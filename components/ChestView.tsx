@@ -175,41 +175,88 @@ export default function ChestView() {
   const currentChest = CHEST_TYPES[currentIndex];
   const Icon = currentChest.icon;
 
-  const startOpen = () => {
+  const startOpen = async () => {
+    if (isOpening) return;
     setIsOpening(true);
     setShowResult(false);
     setIsSpinning(false);
     x.set(0); 
     lastTickIndex.current = -1;
     
-    // 生成 50 个物品
-    const items = Array.from({ length: 50 }).map(() => {
-      const rand = Math.random() * 100;
-      if (rand < 50) return MOCK_PRIZES[0];
-      if (rand < 75) return MOCK_PRIZES[1];
-      if (rand < 90) return MOCK_PRIZES[2];
-      if (rand < 98) return MOCK_PRIZES[3];
-      return MOCK_PRIZES[4];
-    });
-    
-    // 设定第 45 个为中奖物品 (索引 44)
-    const winIndex = 44;
-    const winner = items[winIndex];
-    
-    setRouletteItems(items);
-    setWonItem(winner);
+    try {
+      // 请求后端计算结果
+      const response = await fetch('/api/chest/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chestId: currentChest.id })
+      });
+      
+      if (!response.ok) throw new Error('Failed to open chest');
+      
+      const { wonItemId, randomOffset } = await response.json();
+      
+      // 生成 50 个物品，前 44 个随机展示
+      const items = Array.from({ length: 50 }).map((_, i) => {
+        if (i === 44) {
+          // 第 45 个 (索引 44) 是中奖物品
+          return MOCK_PRIZES.find(p => p.id === wonItemId) || MOCK_PRIZES[0];
+        }
+        // 其他随机填充
+        const rand = Math.random() * 100;
+        if (rand < 50) return MOCK_PRIZES[0];
+        if (rand < 75) return MOCK_PRIZES[1];
+        if (rand < 90) return MOCK_PRIZES[2];
+        if (rand < 98) return MOCK_PRIZES[3];
+        return MOCK_PRIZES[4];
+      });
+      
+      const winIndex = 44;
+      const winner = items[winIndex];
+      
+      setRouletteItems(items);
+      setWonItem(winner);
 
-    setTimeout(() => {
-      if (containerRef.current) {
-        const itemWidth = 100; 
-        const centerOffset = (winIndex * itemWidth) + (itemWidth / 2);
-        const randomOffset = Math.floor(Math.random() * 60) - 30;
-        const finalX = -centerOffset + randomOffset;
-        
-        setTargetX(finalX);
-        setIsSpinning(true);
+      setTimeout(() => {
+        if (containerRef.current) {
+          const itemWidth = 100; 
+          const centerOffset = (winIndex * itemWidth) + (itemWidth / 2);
+          // 使用后端返回的随机偏移量
+          const finalX = -centerOffset + randomOffset;
+          
+          setTargetX(finalX);
+          setIsSpinning(true);
+        }
+      }, 100);
+      
+    } catch (error) {
+      console.error('Error:', error);
+      setIsOpening(false);
+      alert('开启宝箱失败，请重试');
+    }
+  };
+
+  const saveToInventory = async (item: typeof MOCK_PRIZES[0]) => {
+    try {
+      // 从 Telegram WebApp 获取用户 ID，如果没有则使用 mock ID
+      const telegramUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'mock-user-id';
+      
+      const response = await fetch('/api/chest/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: telegramUserId, 
+          item: item 
+        })
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to save to inventory API');
+      } else {
+        console.log('Successfully saved to inventory:', item.name);
       }
-    }, 100);
+    } catch (error) {
+      console.error('Failed to save to inventory:', error);
+    }
   };
 
   const handleSpinComplete = () => {
@@ -223,6 +270,9 @@ export default function ChestView() {
     } catch (e) {}
     
     if (wonItem) {
+      // 动画结束后，自动调用 Supabase 将该物品写入用户的 inventory 表
+      saveToInventory(wonItem);
+
       const duration = 3000;
       const end = Date.now() + duration;
 
@@ -460,9 +510,10 @@ export default function ChestView() {
         
         <button 
           onClick={startOpen}
-          className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest.color} hover:opacity-90 transition-opacity shadow-lg ${currentChest.shadow}`}
+          disabled={isOpening}
+          className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest.color} hover:opacity-90 transition-opacity shadow-lg ${currentChest.shadow} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
-          开启宝箱
+          {isOpening ? '开启中...' : '开启宝箱'}
         </button>
       </div>
     </div>
