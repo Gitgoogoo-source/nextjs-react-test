@@ -9,7 +9,9 @@ export interface TelegramUser {
   photo_url?: string;
 }
 
-export function validateTelegramWebAppData(telegramInitData: string): { isValid: boolean; user?: TelegramUser } {
+export function validateTelegramWebAppData(
+  telegramInitData: string
+): { isValid: boolean; user?: TelegramUser; reason?: 'missing_bot_token' | 'missing_hash' | 'hash_mismatch' | 'invalid_user_json' } {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     // #region agent log
@@ -34,14 +36,14 @@ export function validateTelegramWebAppData(telegramInitData: string): { isValid:
     // #endregion
 
     console.error('TELEGRAM_BOT_TOKEN is not set');
-    return { isValid: false };
+    return { isValid: false, reason: 'missing_bot_token' };
   }
 
   const initData = new URLSearchParams(telegramInitData);
   const hash = initData.get('hash');
   
   if (!hash) {
-    return { isValid: false };
+    return { isValid: false, reason: 'missing_hash' };
   }
 
   initData.delete('hash');
@@ -89,10 +91,11 @@ export function validateTelegramWebAppData(telegramInitData: string): { isValid:
         return { isValid: true, user };
       } catch (e) {
         console.error('Failed to parse user data', e);
+        return { isValid: false, reason: 'invalid_user_json' };
       }
     }
     return { isValid: true };
   }
 
-  return { isValid: false };
+  return { isValid: false, reason: 'hash_mismatch' };
 }
