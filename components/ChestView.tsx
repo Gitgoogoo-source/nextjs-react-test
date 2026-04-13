@@ -51,7 +51,7 @@ export default function ChestView() {
   const currentChest = CHEST_TYPES[currentIndex];
   const Icon = currentChest.icon;
 
-  const variants = {
+  const variants: any = {
     enter: (direction: number) => ({
       x: direction > 0 ? 200 : -200,
       opacity: 0,
@@ -78,7 +78,7 @@ export default function ChestView() {
   };
 
   return (
-    <div className="flex flex-col h-full w-full items-center justify-center relative px-4">
+    <div className="absolute inset-0 flex flex-col items-center justify-center px-4 overflow-hidden">
       {/* 背景光效 */}
       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest.color} rounded-full blur-[100px] opacity-20 transition-colors duration-500`} />
 
