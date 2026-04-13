@@ -29,7 +29,7 @@ export async function syncTelegramUser(initData: string) {
     }).catch(() => {});
     // #endregion
 
-    const { isValid, user } = validateTelegramWebAppData(initData);
+    const { isValid, user, reason } = validateTelegramWebAppData(initData);
 
     if (!isValid || !user) {
       // #region agent log
@@ -48,11 +48,16 @@ export async function syncTelegramUser(initData: string) {
           data: {
             isValid,
             hasUser: Boolean(user),
+            reason: reason ?? null,
           },
           timestamp: Date.now(),
         }),
       }).catch(() => {});
       // #endregion
+
+      if (reason === 'missing_bot_token') {
+        return { success: false, error: 'Server configuration error: TELEGRAM_BOT_TOKEN missing' };
+      }
 
       return { success: false, error: 'Invalid Telegram data' };
     }
