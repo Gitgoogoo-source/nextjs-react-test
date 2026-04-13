@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 
 export async function syncTelegramUser(initData: string) {
@@ -85,14 +85,63 @@ export async function syncTelegramUser(initData: string) {
     }).catch(() => {});
     // #endregion
 
-    const supabase = await createClient();
+    let supabase;
+    try {
+      supabase = createAdminClient();
+    } catch (error) {
+      // #region agent log
+      void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '3430d0',
+        },
+        body: JSON.stringify({
+          sessionId: '3430d0',
+          runId: 'telegram-auth-db-phase',
+          hypothesisId: 'H8',
+          location: 'app/actions/auth.ts:88',
+          message: '创建 Supabase admin 客户端失败',
+          data: {
+            hasAdminClient: false,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
+      console.error('Error creating admin client:', error);
+      return { success: false, error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY missing' };
+    }
 
     // Check if user exists
     const { data: existingUser, error: fetchError } = await supabase
-      .from('profiles')
+      .from('users')
       .select('*')
       .eq('telegram_id', user.id)
       .single();
+
+    // #region agent log
+    void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '3430d0',
+      },
+      body: JSON.stringify({
+        sessionId: '3430d0',
+        runId: 'telegram-auth-db-phase',
+        hypothesisId: 'H5',
+        location: 'app/actions/auth.ts:40',
+        message: 'users 查询结果',
+        data: {
+          hasExistingUser: Boolean(existingUser),
+          fetchErrorCode: fetchError?.code ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 means no rows returned
       console.error('Error fetching user:', fetchError);
@@ -104,15 +153,37 @@ export async function syncTelegramUser(initData: string) {
     if (existingUser) {
       // Update last login
       const { error: updateError } = await supabase
-        .from('profiles')
+        .from('users')
         .update({
           username: user.username || existingUser.username,
           first_name: user.first_name || existingUser.first_name,
           last_name: user.last_name || existingUser.last_name,
-          photo_url: user.photo_url || existingUser.photo_url,
-          last_login_at: now,
+          avatar_url: user.photo_url || existingUser.avatar_url,
+          updated_at: now,
+          balance: typeof existingUser.balance === 'number' ? existingUser.balance : 1000,
         })
         .eq('telegram_id', user.id);
+
+      // #region agent log
+      void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '3430d0',
+        },
+        body: JSON.stringify({
+          sessionId: '3430d0',
+          runId: 'telegram-auth-db-phase',
+          hypothesisId: 'H6',
+          location: 'app/actions/auth.ts:72',
+          message: 'users 更新结果',
+          data: {
+            updateErrorCode: updateError?.code ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       if (updateError) {
         console.error('Error updating user:', updateError);
@@ -121,17 +192,38 @@ export async function syncTelegramUser(initData: string) {
     } else {
       // Create new user with 1000 balance
       const { error: insertError } = await supabase
-        .from('profiles')
+        .from('users')
         .insert({
           telegram_id: user.id,
           username: user.username,
           first_name: user.first_name,
           last_name: user.last_name,
-          photo_url: user.photo_url,
+          avatar_url: user.photo_url,
           balance: 1000,
           created_at: now,
-          last_login_at: now,
+          updated_at: now,
         });
+
+      // #region agent log
+      void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '3430d0',
+        },
+        body: JSON.stringify({
+          sessionId: '3430d0',
+          runId: 'telegram-auth-db-phase',
+          hypothesisId: 'H7',
+          location: 'app/actions/auth.ts:103',
+          message: 'users 插入结果',
+          data: {
+            insertErrorCode: insertError?.code ?? null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       if (insertError) {
         console.error('Error creating user:', insertError);
