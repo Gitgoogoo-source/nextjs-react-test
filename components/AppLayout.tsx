@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, 
   Archive, 
@@ -12,11 +12,24 @@ import {
   Star,
   Leaf
 } from 'lucide-react';
+import { postEvent } from '@tma.js/sdk';
 
 import ChestView from './ChestView';
 
 export default function AppLayout() {
   const [activeTab, setActiveTab] = useState('ducks');
+
+  useEffect(() => {
+    try {
+      // 1. 展开小程序，占据全屏
+      postEvent('web_app_expand');
+      // 2. 禁用 Telegram 的垂直滑动关闭特性 (防止滑动宝箱时误触关闭)
+      postEvent('web_app_setup_swipe_behavior', { allow_vertical_swipe: false });
+    } catch (error) {
+      // 在非 Telegram 环境下（如本地浏览器预览）忽略报错
+      console.warn('Not in Telegram environment');
+    }
+  }, []);
 
   const tabs = [
     { id: 'market', label: '市场', icon: TrendingUp },

@@ -79,8 +79,8 @@ export default function ChestView() {
 
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center px-4 overflow-hidden">
-      {/* 背景光效 */}
-      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest.color} rounded-full blur-[100px] opacity-20 transition-colors duration-500`} />
+      {/* 背景光效 (优化性能: 降低 blur 半径，开启 GPU 硬件加速) */}
+      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest.color} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`} />
 
       <div className="text-center mb-12 z-10">
         <h2 className="text-2xl font-bold text-white mb-2">选择宝箱</h2>
@@ -98,8 +98,10 @@ export default function ChestView() {
             animate="center"
             exit="exit"
             drag="x"
+            dragDirectionLock // 锁定拖拽方向为水平，防止斜向滑动触发垂直滚动
             dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={1}
+            dragElastic={0.5} // 降低弹性，减少过度计算
+            style={{ touchAction: "none" }} // 禁用浏览器默认的触摸行为(如滚动、下拉刷新)，防止误触关闭 TMA
             onDragEnd={(e, { offset, velocity }) => {
               const swipe = swipePower(offset.x, velocity.x);
               if (swipe < -swipeConfidenceThreshold) {
@@ -108,7 +110,7 @@ export default function ChestView() {
                 handlePrev();
               }
             }}
-            className={`absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center p-6 cursor-grab active:cursor-grabbing shadow-2xl ${currentChest.shadow}`}
+            className={`absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center p-6 cursor-grab active:cursor-grabbing shadow-xl ${currentChest.shadow} transform-gpu will-change-transform`}
           >
             <div className={`w-20 h-20 rounded-xl bg-gradient-to-br ${currentChest.color} flex items-center justify-center mb-4 shadow-inner`}>
               <Icon className="w-10 h-10 text-white" />
