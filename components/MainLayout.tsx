@@ -3,8 +3,8 @@
 import React, { useState } from 'react';
 import { 
   LineChart, 
-  Egg, 
-  Bird, 
+  Archive, 
+  Package, 
   Users, 
   CheckSquare,
   Wallet,
@@ -18,8 +18,8 @@ export default function MainLayout() {
 
   const tabs = [
     { id: 'market', label: '市场', icon: LineChart },
-    { id: 'eggs', label: '蛋', icon: Egg, badge: 207 },
-    { id: 'ducks', label: '鸭子', icon: Bird },
+    { id: 'eggs', label: '藏品', icon: Archive, badge: 207 },
+    { id: 'ducks', label: '宝箱', icon: Package },
     { id: 'friends', label: '好友', icon: Users },
     { id: 'tasks', label: '任务', icon: CheckSquare, badge: 3 },
   ];
