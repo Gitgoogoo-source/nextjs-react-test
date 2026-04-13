@@ -5,11 +5,80 @@ import { validateTelegramWebAppData } from '@/lib/telegram';
 
 export async function syncTelegramUser(initData: string) {
   try {
+    // #region agent log
+    void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '3430d0',
+      },
+      body: JSON.stringify({
+        sessionId: '3430d0',
+        runId: 'telegram-auth-pre-fix',
+        hypothesisId: 'H2',
+        location: 'app/actions/auth.ts:7',
+        message: '服务端收到 syncTelegramUser 请求',
+        data: {
+          initDataLength: initData.length,
+          hasHash: initData.includes('hash='),
+          hasUser: initData.includes('user='),
+          hasAuthDate: initData.includes('auth_date='),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
     const { isValid, user } = validateTelegramWebAppData(initData);
 
     if (!isValid || !user) {
+      // #region agent log
+      void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '3430d0',
+        },
+        body: JSON.stringify({
+          sessionId: '3430d0',
+          runId: 'telegram-auth-pre-fix',
+          hypothesisId: 'H3',
+          location: 'app/actions/auth.ts:29',
+          message: '服务端判定 Telegram 数据无效',
+          data: {
+            isValid,
+            hasUser: Boolean(user),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       return { success: false, error: 'Invalid Telegram data' };
     }
+
+    // #region agent log
+    void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '3430d0',
+      },
+      body: JSON.stringify({
+        sessionId: '3430d0',
+        runId: 'telegram-auth-pre-fix',
+        hypothesisId: 'H4',
+        location: 'app/actions/auth.ts:46',
+        message: '服务端验签通过并拿到用户',
+        data: {
+          telegramId: user.id,
+          hasUsername: Boolean(user.username),
+          hasPhoto: Boolean(user.photo_url),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     const supabase = await createClient();
 
