@@ -23,7 +23,7 @@ export function useTelegramAuth() {
         try {
           const launchParams = retrieveLaunchParams();
           if (launchParams && launchParams.initDataRaw) {
-            initData = launchParams.initDataRaw;
+            initData = launchParams.initDataRaw as string;
           }
         } catch (e) {
           console.warn('无法从 @telegram-apps/sdk 获取启动参数', e);
