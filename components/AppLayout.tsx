@@ -13,6 +13,8 @@ import {
   Leaf
 } from 'lucide-react';
 
+import ChestView from './ChestView';
+
 export default function AppLayout() {
   const [activeTab, setActiveTab] = useState('ducks');
 
@@ -58,11 +60,15 @@ export default function AppLayout() {
         </div>
       </div>
 
-      {/* 主内容区域（留空） */}
+      {/* 主内容区域 */}
       <div className="flex-1 relative overflow-y-auto">
-        <div className="absolute inset-0 flex items-center justify-center text-gray-600 font-medium">
-          {tabs.find(t => t.id === activeTab)?.label} 界面内容区域
-        </div>
+        {activeTab === 'ducks' ? (
+          <ChestView />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-600 font-medium">
+            {tabs.find(t => t.id === activeTab)?.label} 界面内容区域
+          </div>
+        )}
       </div>
 
       {/* 底部导航栏 */}
