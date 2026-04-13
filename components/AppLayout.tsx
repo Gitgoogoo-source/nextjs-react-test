@@ -12,12 +12,14 @@ import {
   Star,
   Leaf
 } from 'lucide-react';
-import { postEvent } from '@tma.js/sdk';
+import { postEvent } from '@telegram-apps/sdk';
 
 import ChestView from './ChestView';
+import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 
 export default function AppLayout() {
   const [activeTab, setActiveTab] = useState('ducks');
+  const { user } = useTelegramAuth();
 
   useEffect(() => {
     try {
@@ -25,7 +27,7 @@ export default function AppLayout() {
       postEvent('web_app_expand');
       // 2. 禁用 Telegram 的垂直滑动关闭特性 (防止滑动宝箱时误触关闭)
       postEvent('web_app_setup_swipe_behavior', { allow_vertical_swipe: false });
-    } catch (error) {
+    } catch (err) {
       // 在非 Telegram 环境下（如本地浏览器预览）忽略报错
       console.warn('Not in Telegram environment');
     }
@@ -46,8 +48,14 @@ export default function AppLayout() {
         {/* 左侧：用户信息 */}
         <div className="flex items-center gap-2">
           {/* 头像 */}
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center border-2 border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
-            <span className="text-sm font-bold text-white">K</span>
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center border-2 border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)] overflow-hidden">
+            {user?.photo_url ? (
+              <img src={user.photo_url} alt="avatar" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-sm font-bold text-white">
+                {user?.first_name?.charAt(0) || 'K'}
+              </span>
+            )}
           </div>
           
           {/* 鸭群 */}
