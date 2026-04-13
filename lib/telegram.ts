@@ -14,27 +14,6 @@ export function validateTelegramWebAppData(
 ): { isValid: boolean; user?: TelegramUser; reason?: 'missing_bot_token' | 'missing_hash' | 'hash_mismatch' | 'invalid_user_json' } {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
-    // #region agent log
-    void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '3430d0',
-      },
-      body: JSON.stringify({
-        sessionId: '3430d0',
-        runId: 'telegram-auth-pre-fix',
-        hypothesisId: 'H3',
-        location: 'lib/telegram.ts:14',
-        message: '服务端缺少 TELEGRAM_BOT_TOKEN',
-        data: {
-          hasToken: false,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     console.error('TELEGRAM_BOT_TOKEN is not set');
     return { isValid: false, reason: 'missing_bot_token' };
   }
@@ -57,31 +36,6 @@ export function validateTelegramWebAppData(
   const dataCheckString = dataToCheck.join('\n');
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
   const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-
-  // #region agent log
-  void fetch('http://127.0.0.1:7350/ingest/1b4a6dd6-a323-4199-9b3b-37ab802be016', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': '3430d0',
-    },
-    body: JSON.stringify({
-      sessionId: '3430d0',
-      runId: 'telegram-auth-pre-fix',
-      hypothesisId: 'H3',
-      location: 'lib/telegram.ts:39',
-      message: '服务端完成 Telegram 哈希校验计算',
-      data: {
-        paramsCount: dataToCheck.length,
-        hashMatches: calculatedHash === hash,
-        hasUserField: initData.has('user'),
-        hasStartParam: initData.has('start_param'),
-        authDate: initData.get('auth_date') ? 'present' : 'missing',
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
 
   if (calculatedHash === hash) {
     const userStr = initData.get('user');
