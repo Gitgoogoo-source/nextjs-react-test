@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue } from 'framer-motion';
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 const CHEST_TYPES = [
   {
@@ -34,13 +35,59 @@ const CHEST_TYPES = [
   }
 ];
 
+// CSGO 风格的稀有度颜色
 const MOCK_PRIZES = [
-  { id: 1, name: '普通鸭子', color: 'bg-blue-500/80', border: 'border-blue-400', rarity: 'Normal' },
-  { id: 2, name: '稀有鸭子', color: 'bg-purple-500/80', border: 'border-purple-400', rarity: 'Rare' },
-  { id: 3, name: '史诗鸭子', color: 'bg-pink-500/80', border: 'border-pink-400', rarity: 'Epic' },
-  { id: 4, name: '传说鸭子', color: 'bg-yellow-500/80', border: 'border-yellow-400', rarity: 'Legendary' },
-  { id: 5, name: '绝版鸭子', color: 'bg-red-500/80', border: 'border-red-400', rarity: 'Mythic' },
+  { id: 1, name: '军规级鸭子', color: 'bg-blue-600', border: 'border-blue-400', shadow: 'shadow-blue-500/50', rarity: 'Mil-Spec', hex: '#2563eb' },
+  { id: 2, name: '受限级鸭子', color: 'bg-purple-600', border: 'border-purple-400', shadow: 'shadow-purple-500/50', rarity: 'Restricted', hex: '#9333ea' },
+  { id: 3, name: '保密级鸭子', color: 'bg-pink-600', border: 'border-pink-400', shadow: 'shadow-pink-500/50', rarity: 'Classified', hex: '#db2777' },
+  { id: 4, name: '隐秘级鸭子', color: 'bg-red-600', border: 'border-red-400', shadow: 'shadow-red-500/50', rarity: 'Covert', hex: '#dc2626' },
+  { id: 5, name: '罕见级鸭子', color: 'bg-yellow-500', border: 'border-yellow-400', shadow: 'shadow-yellow-500/50', rarity: 'Rare Special', hex: '#eab308' },
 ];
+
+// 单个轮盘物品组件，用于独立计算每个物品在指针下的缩放和高亮
+const RouletteItem = ({ item, idx, x, itemWidth }: { item: typeof MOCK_PRIZES[0], idx: number, x: MotionValue<number>, itemWidth: number }) => {
+  // 当前物品的中心点偏移量
+  const centerOffset = (idx * itemWidth) + (itemWidth / 2);
+  
+  // 当容器的 x 移动到 -centerOffset 时，该物品正好在屏幕正中央
+  // 我们设定一个范围：当物品距离中心点 ±itemWidth 时开始变化
+  const range = [-centerOffset - itemWidth, -centerOffset, -centerOffset + itemWidth];
+  
+  // 缩放：在正中央时放大到 1.15 倍
+  const scale = useTransform(x, range, [1, 1.15, 1]);
+  // 亮度：在正中央时变亮
+  const brightness = useTransform(x, range, [0.5, 1.2, 0.5]);
+  // z-index：在正中央时置顶，防止被旁边的物品遮挡
+  const zIndex = useTransform(x, range, [0, 10, 0]);
+  // 边框发光透明度
+  const glowOpacity = useTransform(x, range, [0, 1, 0]);
+
+  const filter = useMotionTemplate`brightness(${brightness})`;
+
+  return (
+    <motion.div 
+      style={{ scale, filter, zIndex }}
+      className={`flex-shrink-0 w-[96px] h-24 rounded-lg border-2 ${item.border} ${item.color} flex flex-col items-center justify-center relative overflow-hidden transition-shadow duration-100`}
+    >
+      {/* 稀有物品的背景流光效果 (Radial Gradient) */}
+      {['Classified', 'Covert', 'Rare Special'].includes(item.rarity) && (
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.4)_0%,transparent_70%)] animate-pulse" />
+      )}
+      
+      {/* 指针划过时的边框闪烁高亮 */}
+      <motion.div 
+        style={{ opacity: glowOpacity }}
+        className="absolute inset-0 border-4 border-white rounded-lg pointer-events-none mix-blend-overlay"
+      />
+
+      {/* 物品内部的光泽 */}
+      <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50" />
+      
+      <Package className="w-8 h-8 text-white/90 mb-1 drop-shadow-md relative z-10" />
+      <span className="text-xs font-bold text-white drop-shadow-md relative z-10">{item.name}</span>
+    </motion.div>
+  );
+};
 
 export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -55,6 +102,9 @@ export default function ChestView() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const [targetX, setTargetX] = useState(0);
+  
+  // 追踪容器的 X 轴位移，用于计算物品的高亮
+  const x = useMotionValue(0);
 
   const handleNext = () => {
     if (isOpening) return;
@@ -75,10 +125,17 @@ export default function ChestView() {
     setIsOpening(true);
     setShowResult(false);
     setIsSpinning(false);
+    x.set(0); // 重置 X 轴
     
     // 生成 50 个物品
     const items = Array.from({ length: 50 }).map(() => {
-      return MOCK_PRIZES[Math.floor(Math.random() * MOCK_PRIZES.length)];
+      // 模拟概率：军规 50%, 受限 25%, 保密 15%, 隐秘 8%, 罕见 2%
+      const rand = Math.random() * 100;
+      if (rand < 50) return MOCK_PRIZES[0];
+      if (rand < 75) return MOCK_PRIZES[1];
+      if (rand < 90) return MOCK_PRIZES[2];
+      if (rand < 98) return MOCK_PRIZES[3];
+      return MOCK_PRIZES[4];
     });
     
     // 设定第 45 个为中奖物品 (索引 44)
@@ -91,9 +148,9 @@ export default function ChestView() {
     // 延迟一小段时间后开始动画，确保 DOM 渲染完成
     setTimeout(() => {
       if (containerRef.current) {
-        const containerWidth = containerRef.current.offsetWidth;
         const itemWidth = 100; // w-24 = 96px + 4px gap = 100px
         
+        // 计算目标偏移量：
         // 使用 px-[50%] 后，第一个物品的左侧边缘正好在容器中心。
         // 因此第 winIndex 个物品的中心点相对于初始中心点的偏移量就是：
         const centerOffset = (winIndex * itemWidth) + (itemWidth / 2);
@@ -108,11 +165,54 @@ export default function ChestView() {
     }, 100);
   };
 
+  const handleSpinComplete = () => {
+    setShowResult(true);
+    
+    // 触发全屏粒子喷发效果
+    if (wonItem) {
+      const duration = 3000;
+      const end = Date.now() + duration;
+
+      const frame = () => {
+        confetti({
+          particleCount: 5,
+          angle: 60,
+          spread: 55,
+          origin: { x: 0, y: 0.8 },
+          colors: [wonItem.hex, '#ffffff']
+        });
+        confetti({
+          particleCount: 5,
+          angle: 120,
+          spread: 55,
+          origin: { x: 1, y: 0.8 },
+          colors: [wonItem.hex, '#ffffff']
+        });
+
+        if (Date.now() < end) {
+          requestAnimationFrame(frame);
+        }
+      };
+      
+      // 立即喷发一次大的
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: [wonItem.hex, '#ffffff', '#facc15']
+      });
+      
+      // 持续喷发小的
+      frame();
+    }
+  };
+
   const resetState = () => {
     setIsOpening(false);
     setShowResult(false);
     setIsSpinning(false);
     setRouletteItems([]);
+    x.set(0);
   };
 
   const variants: any = {
@@ -170,31 +270,33 @@ export default function ChestView() {
           <div className="absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1 w-4 h-4 bg-red-500 rotate-45 z-20" />
 
           {/* 滚动容器 */}
-          <div className="overflow-hidden h-32 relative mask-edges">
-            {/* 渐变遮罩，让边缘变暗 */}
-            <div className="absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-zinc-950 to-transparent z-10" />
-            <div className="absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-zinc-950 to-transparent z-10" />
-
+          <div 
+            className="overflow-hidden h-32 relative"
+            // 边缘模糊：强烈的线性渐变遮罩，产生“从虚无中飞出”的视觉感
+            style={{ 
+              maskImage: 'linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)'
+            }}
+          >
             <motion.div 
               className="flex items-center h-full gap-1 px-[50%]"
+              style={{ x }}
               initial={{ x: 0 }}
               animate={{ x: isSpinning ? targetX : 0 }}
               transition={{ 
                 duration: 7, 
                 ease: [0.13, 0.99, 0.22, 1], // 极强重量感的缓动曲线
-                onComplete: () => setShowResult(true)
+                onComplete: handleSpinComplete
               }}
             >
               {rouletteItems.map((item, idx) => (
-                <div 
+                <RouletteItem 
                   key={idx} 
-                  className={`flex-shrink-0 w-[96px] h-24 rounded-lg border-2 ${item.border} ${item.color} flex flex-col items-center justify-center shadow-inner relative overflow-hidden`}
-                >
-                  {/* 物品内部的光泽 */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50" />
-                  <Package className="w-8 h-8 text-white/90 mb-1" />
-                  <span className="text-xs font-bold text-white drop-shadow-md">{item.name}</span>
-                </div>
+                  item={item} 
+                  idx={idx} 
+                  x={x} 
+                  itemWidth={100} 
+                />
               ))}
             </motion.div>
           </div>
@@ -204,19 +306,33 @@ export default function ChestView() {
         <AnimatePresence>
           {showResult && wonItem && (
             <motion.div 
-              initial={{ opacity: 0, y: 20, scale: 0.8 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              className="absolute bottom-20 flex flex-col items-center z-30"
+              initial={{ opacity: 0, y: 50, scale: 0.5 }}
+              animate={{ opacity: 1, y: 0, scale: 1.2 }}
+              transition={{ type: 'spring', bounce: 0.5, duration: 0.8 }}
+              className="absolute bottom-16 flex flex-col items-center z-30"
             >
-              <div className="text-zinc-400 mb-2 font-medium tracking-widest">获得物品</div>
-              <div className={`text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r ${currentChest.color} drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] mb-6`}>
+              {/* 物品背后的光晕 */}
+              <div className={`absolute inset-0 blur-3xl opacity-40 ${wonItem.color} rounded-full scale-150 -z-10`} />
+              
+              <div className="text-zinc-300 mb-2 font-medium tracking-widest text-sm uppercase">获得物品</div>
+              
+              <div className={`relative w-32 h-32 rounded-2xl border-4 ${wonItem.border} ${wonItem.color} flex flex-col items-center justify-center shadow-2xl mb-6 overflow-hidden`}>
+                {['Classified', 'Covert', 'Rare Special'].includes(wonItem.rarity) && (
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.6)_0%,transparent_70%)] animate-spin-slow" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-50" />
+                <Package className="w-16 h-16 text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] relative z-10" />
+              </div>
+
+              <div className={`text-3xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-400 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] mb-8`}>
                 {wonItem.name}
               </div>
+              
               <button 
                 onClick={resetState}
-                className="px-8 py-3 rounded-xl font-bold text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 transition-colors shadow-lg"
+                className="px-10 py-4 rounded-xl font-bold text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 transition-colors shadow-lg active:scale-95"
               >
-                确认
+                收下物品
               </button>
             </motion.div>
           )}
