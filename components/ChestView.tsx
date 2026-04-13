@@ -237,8 +237,8 @@ export default function ChestView() {
 
   const saveToInventory = async (item: typeof MOCK_PRIZES[0]) => {
     try {
-      // 从 Telegram WebApp 获取用户 ID，如果没有则使用 mock ID
-      const telegramUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 'mock-user-id';
+      // 从 Telegram WebApp 获取用户 ID，如果没有则使用 mock ID (123456789)
+      const telegramUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 123456789;
       
       const response = await fetch('/api/chest/save', {
         method: 'POST',
