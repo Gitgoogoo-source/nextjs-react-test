@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue, useMotionValueEvent } from 'framer-motion';
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -35,29 +35,66 @@ const CHEST_TYPES = [
   }
 ];
 
-// CSGO 风格的稀有度颜色
+// CSGO 风格的稀有度颜色，修改为玻璃拟态 (Glassmorphism) 风格
 const MOCK_PRIZES = [
-  { id: 1, name: '军规级鸭子', color: 'bg-blue-600', border: 'border-blue-400', shadow: 'shadow-blue-500/50', rarity: 'Mil-Spec', hex: '#2563eb' },
-  { id: 2, name: '受限级鸭子', color: 'bg-purple-600', border: 'border-purple-400', shadow: 'shadow-purple-500/50', rarity: 'Restricted', hex: '#9333ea' },
-  { id: 3, name: '保密级鸭子', color: 'bg-pink-600', border: 'border-pink-400', shadow: 'shadow-pink-500/50', rarity: 'Classified', hex: '#db2777' },
-  { id: 4, name: '隐秘级鸭子', color: 'bg-red-600', border: 'border-red-400', shadow: 'shadow-red-500/50', rarity: 'Covert', hex: '#dc2626' },
-  { id: 5, name: '罕见级鸭子', color: 'bg-yellow-500', border: 'border-yellow-400', shadow: 'shadow-yellow-500/50', rarity: 'Rare Special', hex: '#eab308' },
+  { id: 1, name: '军规级鸭子', color: 'bg-blue-500/20', border: 'border-blue-400/50', shadow: 'shadow-blue-500/50', rarity: 'Mil-Spec', hex: '#3b82f6' },
+  { id: 2, name: '受限级鸭子', color: 'bg-purple-500/20', border: 'border-purple-400/50', shadow: 'shadow-purple-500/50', rarity: 'Restricted', hex: '#a855f7' },
+  { id: 3, name: '保密级鸭子', color: 'bg-pink-500/20', border: 'border-pink-400/50', shadow: 'shadow-pink-500/50', rarity: 'Classified', hex: '#ec4899' },
+  { id: 4, name: '隐秘级鸭子', color: 'bg-red-500/20', border: 'border-red-400/50', shadow: 'shadow-red-500/50', rarity: 'Covert', hex: '#ef4444' },
+  { id: 5, name: '罕见级鸭子', color: 'bg-yellow-500/20', border: 'border-yellow-400/50', shadow: 'shadow-yellow-500/50', rarity: 'Rare Special', hex: '#eab308' },
 ];
 
-// 单个轮盘物品组件，用于独立计算每个物品在指针下的缩放和高亮
+// 播放短促的滴答声
+const playTickSound = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.type = 'sine';
+    // 频率设置得高一点，时间极短，产生类似 tick 的声音
+    osc.frequency.setValueAtTime(800, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+    
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.05);
+  } catch (e) {
+    console.error('Audio play failed', e);
+  }
+};
+
+// 触发 Telegram 震动
+const triggerHaptic = () => {
+  try {
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+      window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+    }
+  } catch (e) {
+    console.error('Haptic feedback failed', e);
+  }
+};
+
+// 单个轮盘物品组件
 const RouletteItem = ({ item, idx, x, itemWidth }: { item: typeof MOCK_PRIZES[0], idx: number, x: MotionValue<number>, itemWidth: number }) => {
   // 当前物品的中心点偏移量
   const centerOffset = (idx * itemWidth) + (itemWidth / 2);
   
   // 当容器的 x 移动到 -centerOffset 时，该物品正好在屏幕正中央
-  // 我们设定一个范围：当物品距离中心点 ±itemWidth 时开始变化
   const range = [-centerOffset - itemWidth, -centerOffset, -centerOffset + itemWidth];
   
   // 缩放：在正中央时放大到 1.15 倍
   const scale = useTransform(x, range, [1, 1.15, 1]);
   // 亮度：在正中央时变亮
   const brightness = useTransform(x, range, [0.5, 1.2, 0.5]);
-  // z-index：在正中央时置顶，防止被旁边的物品遮挡
+  // z-index：在正中央时置顶
   const zIndex = useTransform(x, range, [0, 10, 0]);
   // 边框发光透明度
   const glowOpacity = useTransform(x, range, [0, 1, 0]);
@@ -67,7 +104,7 @@ const RouletteItem = ({ item, idx, x, itemWidth }: { item: typeof MOCK_PRIZES[0]
   return (
     <motion.div 
       style={{ scale, filter, zIndex }}
-      className={`flex-shrink-0 w-[96px] h-24 rounded-lg border-2 ${item.border} ${item.color} flex flex-col items-center justify-center relative overflow-hidden transition-shadow duration-100`}
+      className={`flex-shrink-0 w-[96px] h-24 rounded-lg border-2 ${item.border} ${item.color} backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden transition-shadow duration-100`}
     >
       {/* 稀有物品的背景流光效果 (Radial Gradient) */}
       {['Classified', 'Covert', 'Rare Special'].includes(item.rarity) && (
@@ -103,8 +140,25 @@ export default function ChestView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [targetX, setTargetX] = useState(0);
   
-  // 追踪容器的 X 轴位移，用于计算物品的高亮
+  // 追踪容器的 X 轴位移，用于计算物品的高亮和触发音效
   const x = useMotionValue(0);
+  const lastTickIndex = useRef(-1);
+
+  // 监听 X 轴变化，触发音效和震动
+  useMotionValueEvent(x, "change", (latest) => {
+    if (!isSpinning) return;
+    
+    const itemWidth = 100; // 每个物品的宽度 + gap
+    // 计算当前指针指向的物品索引
+    // 因为 x 是负数，所以取绝对值
+    const currentPointerIndex = Math.floor(Math.abs(latest) / itemWidth);
+    
+    if (currentPointerIndex !== lastTickIndex.current) {
+      lastTickIndex.current = currentPointerIndex;
+      playTickSound();
+      triggerHaptic();
+    }
+  });
 
   const handleNext = () => {
     if (isOpening) return;
@@ -125,11 +179,11 @@ export default function ChestView() {
     setIsOpening(true);
     setShowResult(false);
     setIsSpinning(false);
-    x.set(0); // 重置 X 轴
+    x.set(0); 
+    lastTickIndex.current = -1;
     
     // 生成 50 个物品
     const items = Array.from({ length: 50 }).map(() => {
-      // 模拟概率：军规 50%, 受限 25%, 保密 15%, 隐秘 8%, 罕见 2%
       const rand = Math.random() * 100;
       if (rand < 50) return MOCK_PRIZES[0];
       if (rand < 75) return MOCK_PRIZES[1];
@@ -145,17 +199,10 @@ export default function ChestView() {
     setRouletteItems(items);
     setWonItem(winner);
 
-    // 延迟一小段时间后开始动画，确保 DOM 渲染完成
     setTimeout(() => {
       if (containerRef.current) {
-        const itemWidth = 100; // w-24 = 96px + 4px gap = 100px
-        
-        // 计算目标偏移量：
-        // 使用 px-[50%] 后，第一个物品的左侧边缘正好在容器中心。
-        // 因此第 winIndex 个物品的中心点相对于初始中心点的偏移量就是：
+        const itemWidth = 100; 
         const centerOffset = (winIndex * itemWidth) + (itemWidth / 2);
-        
-        // 加上一个随机偏移量，让指针不总是停在物品正中央 (-30 到 30)
         const randomOffset = Math.floor(Math.random() * 60) - 30;
         const finalX = -centerOffset + randomOffset;
         
@@ -168,7 +215,13 @@ export default function ChestView() {
   const handleSpinComplete = () => {
     setShowResult(true);
     
-    // 触发全屏粒子喷发效果
+    // 最终中奖时的强烈震动
+    try {
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+      }
+    } catch (e) {}
+    
     if (wonItem) {
       const duration = 3000;
       const end = Date.now() + duration;
@@ -194,7 +247,6 @@ export default function ChestView() {
         }
       };
       
-      // 立即喷发一次大的
       confetti({
         particleCount: 100,
         spread: 70,
@@ -202,7 +254,6 @@ export default function ChestView() {
         colors: [wonItem.hex, '#ffffff', '#facc15']
       });
       
-      // 持续喷发小的
       frame();
     }
   };
@@ -213,6 +264,7 @@ export default function ChestView() {
     setIsSpinning(false);
     setRouletteItems([]);
     x.set(0);
+    lastTickIndex.current = -1;
   };
 
   const variants: any = {
@@ -243,7 +295,8 @@ export default function ChestView() {
 
   if (isOpening) {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 overflow-hidden">
+      // 移动端全屏适配
+      <div className="fixed inset-0 w-screen h-screen flex flex-col items-center justify-center bg-zinc-950 overflow-hidden z-50">
         {/* 工业/科技风背景 */}
         <div className="absolute inset-0 opacity-20 pointer-events-none">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#4f4f4f2e_1px,transparent_1px),linear-gradient(to_bottom,#4f4f4f2e_1px,transparent_1px)] bg-[size:14px_24px]" />
@@ -254,7 +307,7 @@ export default function ChestView() {
         {!isSpinning && !showResult && (
           <button 
             onClick={resetState}
-            className="absolute top-6 left-4 text-zinc-400 hover:text-white flex items-center gap-2 z-20"
+            className="absolute top-safe-offset-6 left-4 text-zinc-400 hover:text-white flex items-center gap-2 z-20 mt-4"
           >
             <ArrowLeft className="w-5 h-5" />
             <span>返回</span>
@@ -271,8 +324,7 @@ export default function ChestView() {
 
           {/* 滚动容器 */}
           <div 
-            className="overflow-hidden h-32 relative"
-            // 边缘模糊：强烈的线性渐变遮罩，产生“从虚无中飞出”的视觉感
+            className="overflow-hidden h-32 relative w-full"
             style={{ 
               maskImage: 'linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)',
               WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)'
@@ -309,14 +361,14 @@ export default function ChestView() {
               initial={{ opacity: 0, y: 50, scale: 0.5 }}
               animate={{ opacity: 1, y: 0, scale: 1.2 }}
               transition={{ type: 'spring', bounce: 0.5, duration: 0.8 }}
-              className="absolute bottom-16 flex flex-col items-center z-30"
+              className="absolute bottom-1/4 flex flex-col items-center z-30"
             >
               {/* 物品背后的光晕 */}
-              <div className={`absolute inset-0 blur-3xl opacity-40 ${wonItem.color} rounded-full scale-150 -z-10`} />
+              <div className={`absolute inset-0 blur-3xl opacity-40 ${wonItem.color.replace('/20', '')} rounded-full scale-150 -z-10`} />
               
               <div className="text-zinc-300 mb-2 font-medium tracking-widest text-sm uppercase">获得物品</div>
               
-              <div className={`relative w-32 h-32 rounded-2xl border-4 ${wonItem.border} ${wonItem.color} flex flex-col items-center justify-center shadow-2xl mb-6 overflow-hidden`}>
+              <div className={`relative w-32 h-32 rounded-2xl border-4 ${wonItem.border.replace('/50', '')} ${wonItem.color} backdrop-blur-md flex flex-col items-center justify-center shadow-2xl mb-6 overflow-hidden`}>
                 {['Classified', 'Covert', 'Rare Special'].includes(wonItem.rarity) && (
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.6)_0%,transparent_70%)] animate-spin-slow" />
                 )}
@@ -330,7 +382,7 @@ export default function ChestView() {
               
               <button 
                 onClick={resetState}
-                className="px-10 py-4 rounded-xl font-bold text-white bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 transition-colors shadow-lg active:scale-95"
+                className="px-10 py-4 rounded-xl font-bold text-white bg-zinc-800/80 backdrop-blur-md hover:bg-zinc-700/80 border border-zinc-600 transition-colors shadow-lg active:scale-95"
               >
                 收下物品
               </button>
