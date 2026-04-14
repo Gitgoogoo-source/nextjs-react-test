@@ -439,25 +439,25 @@ export default function ChestView() {
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center px-4 overflow-hidden">
+    <div className="absolute inset-0 flex flex-col items-center justify-between px-4 py-6 overflow-hidden">
       {/* 背景光效 */}
       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest.color} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`} />
 
-      <div className="text-center mb-12 z-10">
-        <h2 className="text-2xl font-bold text-white mb-2">选择宝箱</h2>
+      <div className="text-center z-10 shrink-0 mt-2">
+        <h2 className="text-2xl font-bold text-white mb-1">选择宝箱</h2>
         <p className="text-gray-400 text-sm">滑动或点击切换不同类型的宝箱</p>
       </div>
 
       {/* 宝箱展示区 */}
-      <div className="relative w-full max-w-[280px] h-64 flex items-center justify-center z-10">
+      <div className="relative w-full h-64 flex items-center justify-center z-10 shrink-0 my-auto">
         {/* 固定选中边框：不跟随滑动，只做选中强调 */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-30">
           <div className="w-48 h-56 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
         </div>
 
-        {/* 核心滑动区（宝箱动），可超出屏幕边缘后裁切 */}
+        {/* 核心滑动区（宝箱动） */}
         <motion.div
-          className="relative w-[calc(100vw+160px)] max-w-[520px] h-64 overflow-hidden flex items-center justify-center"
+          className="relative w-full h-full flex items-center justify-center"
           style={{ touchAction: 'pan-y' }}
           drag="x"
           dragDirectionLock
@@ -481,7 +481,7 @@ export default function ChestView() {
             const zIndex = isCenter ? 20 : absOffset === 1 ? 10 : absOffset === 2 ? 5 : 0;
 
             // Cover Flow：左右偏移 + 轻微 3D 视差（rotateY + perspective）
-            const step = 120;
+            const step = 85;
             const translateX = `${offset * step}%`;
             const rotateY = offset === 0 ? 0 : Math.max(-55, Math.min(55, -offset * 22));
             const translateZ = isCenter ? 50 : absOffset === 1 ? 10 : 0;
@@ -535,20 +535,20 @@ export default function ChestView() {
         {/* 左右切换按钮 */}
         <button 
           onClick={handlePrev}
-          className="absolute -left-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-20"
+          className="absolute left-0 sm:left-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
         >
           &#10094;
         </button>
         <button 
           onClick={handleNext}
-          className="absolute -right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-20"
+          className="absolute right-0 sm:right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
         >
           &#10095;
         </button>
       </div>
 
       {/* 底部操作区 */}
-      <div className="mt-12 flex flex-col items-center gap-4 z-10 w-full max-w-[280px]">
+      <div className="flex flex-col items-center gap-3 z-10 w-full max-w-[280px] shrink-0 mb-4">
         {/* 底部文字：只能淡入淡出，不能跟着滑动 */}
         <div className="relative h-11 w-full flex items-center justify-center">
           <AnimatePresence mode="wait" initial={false}>
