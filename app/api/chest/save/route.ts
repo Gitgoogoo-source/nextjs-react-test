@@ -71,16 +71,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
-    // 3. 写入用户的 inventory 表
-    const { data, error } = await supabase
-      .from('inventory')
-      .insert({
-        user_id: user.id,
-        item_id: itemUuid,
-        acquired_at: new Date().toISOString()
-      })
-      .select()
-      .single();
+    // 3. 写入用户的 user_items 表
+    // 先查询是否已有该物品
+    const { data: userItem, error: userItemError } = await supabase
+      .from('user_items')
+      .select('id, quantity')
+      .eq('user_id', user.id)
+      .eq('item_id', itemUuid)
+      .maybeSingle();
+
+    if (userItemError) {
+      console.error('Error fetching user_items:', userItemError);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+
+    let data, error;
+    if (userItem) {
+      // 更新数量
+      const updateResult = await supabase
+        .from('user_items')
+        .update({ quantity: userItem.quantity + 1, updated_at: new Date().toISOString() })
+        .eq('id', userItem.id)
+        .select()
+        .single();
+      data = updateResult.data;
+      error = updateResult.error;
+    } else {
+      // 插入新记录
+      const insertResult = await supabase
+        .from('user_items')
+        .insert({
+          user_id: user.id,
+          item_id: itemUuid,
+          quantity: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      data = insertResult.data;
+      error = insertResult.error;
+    }
 
     if (error) {
       console.error('Error saving to inventory:', error);

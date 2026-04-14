@@ -105,33 +105,26 @@ export async function POST(request: Request) {
 
     const itemUuid = ITEM_ID_MAP[wonItemId];
 
-    // 5. 执行数据库更新 (扣除宝箱、扣除余额、增加物品)
-    // 扣除宝箱
-    const { error: updateCaseError } = await supabase
-      .from('user_cases')
-      .update({ quantity: userCase.quantity - 1 })
-      .eq('id', userCase.id);
+    // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
+    // 这样可以避免并发请求导致的余额或宝箱数量超扣问题
+    const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
+      p_user_id: user.id,
+      p_chest_id: chestId,
+      p_price: price,
+      p_item_id: itemUuid
+    });
 
-    if (updateCaseError) throw updateCaseError;
-
-    // 扣除余额
-    const { error: updateBalanceError } = await supabase
-      .from('users')
-      .update({ balance: user.balance - price })
-      .eq('id', user.id);
-
-    if (updateBalanceError) throw updateBalanceError;
-
-    // 增加物品到库存
-    const { error: insertInventoryError } = await supabase
-      .from('inventory')
-      .insert({
-        user_id: user.id,
-        item_id: itemUuid,
-        acquired_at: new Date().toISOString()
-      });
-
-    if (insertInventoryError) throw insertInventoryError;
+    if (rpcError) {
+      console.error('RPC Error:', rpcError);
+      // 根据错误信息返回对应的状态
+      if (rpcError.message.includes('Insufficient balance')) {
+        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+      }
+      if (rpcError.message.includes('Not enough chests')) {
+        return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+      }
+      throw rpcError;
+    }
 
     // 生成随机偏移量 (-30 到 30)
     const randomOffset = Math.floor(Math.random() * 60) - 30;
