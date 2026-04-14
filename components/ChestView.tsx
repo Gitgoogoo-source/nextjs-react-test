@@ -33,6 +33,14 @@ const CHEST_TYPES = [
     icon: Crown,
     price: 2000,
     description: '必定获得极其珍贵的绝版物品',
+  {
+    id: 'legend',
+    name: '传说宝箱',
+    color: 'from-yellow-400 to-yellow-600',
+    shadow: 'shadow-yellow-500/50',
+    icon: Crown,
+    price: 5000,
+    description: '必定获得传说级物品，万中无一',
   }
 ];
 

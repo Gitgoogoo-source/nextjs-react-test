@@ -23,6 +23,13 @@ const DROP_RATES = {
     { id: 3, chance: 30 },
     { id: 4, chance: 50 },
     { id: 5, chance: 20 },
+  ],
+  legend: [
+    { id: 1, chance: 0 },
+    { id: 2, chance: 0 },
+    { id: 3, chance: 0 },
+    { id: 4, chance: 0 },
+    { id: 5, chance: 100 },
   ]
 };
 
@@ -30,6 +37,7 @@ const CHEST_PRICES: Record<string, number> = {
   normal: 100,
   rare: 500,
   exclusive: 2000,
+  legend: 5000,
 };
 
 // 映射前端的 mock ID 到数据库的 UUID

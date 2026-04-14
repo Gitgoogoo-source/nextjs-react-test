@@ -38,10 +38,12 @@ export async function GET(request: Request) {
 
     // 2. 读取用户持有的宝箱类型和数量
     // 表名为 user_cases，包含 user_id, case_id, quantity
+    // 过滤掉数量为 0 的宝箱
     const { data: chests, error: chestsError } = await supabase
       .from('user_cases')
       .select('case_id, quantity')
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .gt('quantity', 0);
 
     if (chestsError) {
       console.error('Error fetching chests:', chestsError);
