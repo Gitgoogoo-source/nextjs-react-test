@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // 注意：当前数据库开启了 RLS，但未配置 users/inventory 的策略。
+    // 注意：当前数据库开启了 RLS，但未配置 users/user_items 的策略。
     // 因此服务端写入必须使用 service role（管理员客户端）绕过 RLS。
     let supabase;
     try {
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     }
 
     if (error) {
-      console.error('Error saving to inventory:', error);
+      console.error('Error saving to user_items:', error);
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
