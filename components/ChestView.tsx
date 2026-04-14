@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue, useMotionValueEvent } from 'framer-motion';
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -48,9 +48,10 @@ const MOCK_PRIZES = [
 // 播放短促的滴答声
 const playTickSound = () => {
   try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
+    const w = window as unknown as { webkitAudioContext?: typeof AudioContext } & Window;
+    const AudioContextCtor = window.AudioContext || w.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    const ctx = new AudioContextCtor();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     
@@ -129,7 +130,6 @@ const RouletteItem = ({ item, idx, x, itemWidth }: { item: typeof MOCK_PRIZES[0]
 
 export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [direction, setDirection] = useState(0);
   const [isOpening, setIsOpening] = useState(false);
   const { isSyncing, error: authError, user: tgUser } = useTelegramAuth();
   
@@ -164,18 +164,15 @@ export default function ChestView() {
 
   const handleNext = () => {
     if (isOpening) return;
-    setDirection(1);
     setCurrentIndex((prev) => (prev + 1) % CHEST_TYPES.length);
   };
 
   const handlePrev = () => {
     if (isOpening) return;
-    setDirection(-1);
     setCurrentIndex((prev) => (prev - 1 + CHEST_TYPES.length) % CHEST_TYPES.length);
   };
 
   const currentChest = CHEST_TYPES[currentIndex];
-  const Icon = currentChest.icon;
 
   const startOpen = async () => {
     if (isOpening) return;
@@ -278,7 +275,7 @@ export default function ChestView() {
       if (window.Telegram?.WebApp?.HapticFeedback) {
         window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
       }
-    } catch (e) {}
+    } catch {}
     
     if (wonItem) {
       // 动画结束后，自动调用 Supabase 将该物品写入用户的 inventory 表
@@ -328,31 +325,18 @@ export default function ChestView() {
     lastTickIndex.current = -1;
   };
 
-  const variants: any = {
-    enter: (direction: number) => ({
-      x: direction > 0 ? 200 : -200,
-      opacity: 0,
-      scale: 0.8,
-    }),
-    center: {
-      x: 0,
-      opacity: 1,
-      scale: 1,
-      transition: {
-        type: 'spring',
-        stiffness: 300,
-        damping: 30,
-      }
-    },
-    exit: (direction: number) => ({
-      x: direction < 0 ? 200 : -200,
-      opacity: 0,
-      scale: 0.8,
-      transition: {
-        duration: 0.2
-      }
-    })
+  const wrapIndex = (idx: number, len: number) => ((idx % len) + len) % len;
+  const getRelativeOffset = (idx: number, current: number, len: number) => {
+    // 让 offset 落在 [-floor(len/2), floor(len/2)]，实现“环形”相邻关系
+    const raw = idx - current;
+    const half = Math.floor(len / 2);
+    let offset = raw;
+    if (offset > half) offset -= len;
+    if (offset < -half) offset += len;
+    return offset;
   };
+
+  const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
   if (isOpening) {
     return (
@@ -466,36 +450,80 @@ export default function ChestView() {
 
       {/* 宝箱展示区 */}
       <div className="relative w-full max-w-[280px] h-64 flex items-center justify-center z-10">
-        <AnimatePresence initial={false} custom={direction} mode="popLayout">
-          <motion.div
-            key={currentIndex}
-            custom={direction}
-            variants={variants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            drag="x"
-            dragDirectionLock
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.5}
-            style={{ touchAction: "none" }}
-            onDragEnd={(e, { offset, velocity }) => {
-              const swipe = Math.abs(offset.x) * velocity.x;
-              if (swipe < -10000) {
-                handleNext();
-              } else if (swipe > 10000) {
-                handlePrev();
-              }
-            }}
-            className={`absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center p-6 cursor-grab active:cursor-grabbing shadow-xl ${currentChest.shadow} transform-gpu will-change-transform`}
-          >
-            <div className={`w-20 h-20 rounded-xl bg-gradient-to-br ${currentChest.color} flex items-center justify-center mb-4 shadow-inner`}>
-              <Icon className="w-10 h-10 text-white" />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-1">{currentChest.name}</h3>
-            <p className="text-xs text-gray-300 text-center">{currentChest.description}</p>
-          </motion.div>
-        </AnimatePresence>
+        {/* 核心滑动区（宝箱动），可超出屏幕边缘后裁切 */}
+        <motion.div
+          className="relative w-[calc(100vw+160px)] max-w-[520px] h-64 overflow-hidden flex items-center justify-center"
+          style={{ touchAction: 'pan-y' }}
+          drag="x"
+          dragDirectionLock
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={0.2}
+          onDragEnd={(e, { offset, velocity }) => {
+            const swipePower = Math.abs(offset.x) * velocity.x;
+            if (swipePower < -8000) handleNext();
+            else if (swipePower > 8000) handlePrev();
+          }}
+        >
+          {CHEST_TYPES.map((chest, idx) => {
+            const offset = getRelativeOffset(idx, currentIndex, CHEST_TYPES.length);
+            const isCenter = offset === 0;
+            const isAdjacent = Math.abs(offset) === 1;
+
+            // 仅渲染前/中/后 + 其余隐藏（opacity: 0）
+            const opacity = isCenter ? 1 : isAdjacent ? 0.4 : 0;
+            const scale = isCenter ? 1 : isAdjacent ? 0.75 : 0.75;
+            const zIndex = isCenter ? 20 : isAdjacent ? 10 : 0;
+
+            // Cover Flow：左右偏移 + 轻微 3D 视差（rotateY + perspective）
+            const translateX = offset === -1 ? '-120%' : offset === 1 ? '120%' : '0%';
+            const rotateY = offset === -1 ? 35 : offset === 1 ? -35 : 0;
+            const translateZ = isCenter ? 50 : 0;
+
+            const ChestIcon = chest.icon;
+
+            return (
+              <motion.button
+                key={chest.id}
+                type="button"
+                onClick={() => {
+                  if (isOpening) return;
+                  if (idx === currentIndex) return;
+                  setCurrentIndex(wrapIndex(idx, CHEST_TYPES.length));
+                }}
+                className="absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center p-6 shadow-xl transform-gpu will-change-transform focus:outline-none"
+                style={{
+                  zIndex,
+                  transformPerspective: 1200,
+                  pointerEvents: opacity === 0 ? 'none' : 'auto',
+                }}
+                initial={false}
+                animate={{
+                  opacity,
+                  scale,
+                  x: translateX,
+                  rotateY,
+                  z: translateZ,
+                  transition: spring,
+                }}
+                whileTap={{ scale: isCenter ? 0.98 : scale }}
+              >
+                {/* 保留居中选中时的蓝色发光 + 玻璃拟态背景（原有 shadow 逻辑） */}
+                <div
+                  className={[
+                    'absolute inset-0 rounded-2xl pointer-events-none',
+                    isCenter ? chest.shadow : '',
+                  ].join(' ')}
+                />
+
+                <div className={`w-20 h-20 rounded-xl bg-gradient-to-br ${chest.color} flex items-center justify-center mb-4 shadow-inner`}>
+                  <ChestIcon className="w-10 h-10 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-1">{chest.name}</h3>
+                <p className="text-xs text-gray-300 text-center">{chest.description}</p>
+              </motion.button>
+            );
+          })}
+        </motion.div>
 
         {/* 左右切换按钮 */}
         <button 
@@ -514,9 +542,22 @@ export default function ChestView() {
 
       {/* 底部操作区 */}
       <div className="mt-12 flex flex-col items-center gap-4 z-10 w-full max-w-[280px]">
-        <div className="flex items-center gap-2 text-lg font-bold text-white bg-black/30 px-6 py-2 rounded-full border border-white/10">
-          <span>开启需要:</span>
-          <span className="text-green-400">{currentChest.price} 叶子</span>
+        {/* 底部文字：只能淡入淡出，不能跟着滑动 */}
+        <div className="relative h-11 w-full flex items-center justify-center">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={currentChest.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, transition: { duration: 0.18 } }}
+              exit={{ opacity: 0, transition: { duration: 0.12 } }}
+              className="absolute inset-0 flex items-center justify-center"
+            >
+              <div className="flex items-center gap-2 text-lg font-bold text-white bg-black/30 px-6 py-2 rounded-full border border-white/10">
+                <span>开启需要:</span>
+                <span className="text-green-400">{currentChest.price} 叶子</span>
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
         
         <button 
