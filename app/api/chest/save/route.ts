@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 // 映射前端的 mock ID 到数据库的 UUID
 const ITEM_ID_MAP: Record<number, string> = {
@@ -18,6 +18,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    // 注意：当前数据库开启了 RLS，但未配置 users/inventory 的策略。
+    // 因此服务端写入必须使用 service role（管理员客户端）绕过 RLS。
+    let supabase;
+    try {
+      supabase = createAdminClient();
+    } catch (error) {
+      console.error('Error creating admin client:', error);
+      return NextResponse.json(
+        { error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY missing' },
+        { status: 500 }
+      );
+    }
+
     const itemUuid = ITEM_ID_MAP[item.id];
     if (!itemUuid) {
       return NextResponse.json({ error: 'Invalid item ID' }, { status: 400 });
@@ -28,11 +41,14 @@ export async function POST(request: Request) {
       .from('users')
       .select('id, balance')
       .eq('telegram_id', telegramUserId)
-      .single();
+      .maybeSingle();
 
     if (userError || !user) {
       console.error('User not found:', userError);
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'User not found. Please sync Telegram user first.' },
+        { status: 404 }
+      );
     }
 
     // 2. 扣除余额 (假设普通宝箱价格为 100，这里可以根据实际逻辑调整，或者在 open 接口扣除)
@@ -46,10 +62,14 @@ export async function POST(request: Request) {
     }
 
     // 更新余额
-    await supabase
+    const { error: balanceError } = await supabase
       .from('users')
       .update({ balance: newBalance })
       .eq('id', user.id);
+    if (balanceError) {
+      console.error('Error updating balance:', balanceError);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
 
     // 3. 写入用户的 inventory 表
     const { data, error } = await supabase

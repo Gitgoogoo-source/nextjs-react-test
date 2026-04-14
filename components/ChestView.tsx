@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue, useMotionValueEvent } from 'framer-motion';
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 
 const CHEST_TYPES = [
   {
@@ -130,6 +131,7 @@ export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(0);
   const [isOpening, setIsOpening] = useState(false);
+  const { isSyncing, error: authError, user: tgUser } = useTelegramAuth();
   
   // 轮盘状态
   const [rouletteItems, setRouletteItems] = useState<typeof MOCK_PRIZES>([]);
@@ -237,8 +239,16 @@ export default function ChestView() {
 
   const saveToInventory = async (item: typeof MOCK_PRIZES[0]) => {
     try {
-      // 从 Telegram WebApp 获取用户 ID，如果没有则使用 mock ID (123456789)
-      const telegramUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id || 123456789;
+      // 必须先完成 Telegram 用户同步，否则 users 表里没有该 telegram_id，会导致无法写入 inventory
+      if (isSyncing) {
+        console.warn('Telegram 用户仍在同步中，跳过写入库存');
+        return;
+      }
+      if (authError || !tgUser?.id) {
+        console.error('Telegram 用户未就绪，无法写入库存:', authError);
+        return;
+      }
+      const telegramUserId = tgUser.id;
       
       const response = await fetch('/api/chest/save', {
         method: 'POST',
@@ -250,7 +260,8 @@ export default function ChestView() {
       });
       
       if (!response.ok) {
-        console.error('Failed to save to inventory API');
+        const payload = await response.json().catch(() => null);
+        console.error('Failed to save to inventory API', payload);
       } else {
         console.log('Successfully saved to inventory:', item.name);
       }
