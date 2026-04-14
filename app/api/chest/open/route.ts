@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 // 模拟数据库中的掉率表
 const DROP_RATES = {
@@ -25,17 +26,71 @@ const DROP_RATES = {
   ]
 };
 
+const CHEST_PRICES: Record<string, number> = {
+  normal: 100,
+  rare: 500,
+  exclusive: 2000,
+};
+
+// 映射前端的 mock ID 到数据库的 UUID
+const ITEM_ID_MAP: Record<number, string> = {
+  1: '11111111-1111-1111-1111-111111111111',
+  2: '22222222-2222-2222-2222-222222222222',
+  3: '33333333-3333-3333-3333-333333333333',
+  4: '44444444-4444-4444-4444-444444444444',
+  5: '55555555-5555-5555-5555-555555555555',
+};
+
 export async function POST(request: Request) {
   try {
-    const { chestId } = await request.json();
+    const { chestId, userId: telegramUserId } = await request.json();
     
-    if (!chestId || !DROP_RATES[chestId as keyof typeof DROP_RATES]) {
-      return NextResponse.json({ error: 'Invalid chest ID' }, { status: 400 });
+    if (!telegramUserId || !chestId || !DROP_RATES[chestId as keyof typeof DROP_RATES]) {
+      return NextResponse.json({ error: 'Invalid request data' }, { status: 400 });
     }
 
+    let supabase;
+    try {
+      supabase = createAdminClient();
+    } catch (error) {
+      console.error('Error creating admin client:', error);
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 }
+      );
+    }
+
+    // 1. 获取用户信息
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, balance')
+      .eq('telegram_id', telegramUserId)
+      .maybeSingle();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // 2. 检查用户是否拥有该宝箱
+    const { data: userCase, error: caseError } = await supabase
+      .from('user_cases')
+      .select('id, quantity')
+      .eq('user_id', user.id)
+      .eq('case_id', chestId)
+      .maybeSingle();
+
+    if (caseError || !userCase || userCase.quantity <= 0) {
+      return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+    }
+
+    // 3. 检查余额是否足够
+    const price = CHEST_PRICES[chestId as keyof typeof CHEST_PRICES] || 0;
+    if (user.balance < price) {
+      return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+    }
+
+    // 4. 计算随机结果
     const rates = DROP_RATES[chestId as keyof typeof DROP_RATES];
-    
-    // 计算随机结果
     const rand = Math.random() * 100;
     let cumulative = 0;
     let wonItemId = 1;
@@ -47,6 +102,36 @@ export async function POST(request: Request) {
         break;
       }
     }
+
+    const itemUuid = ITEM_ID_MAP[wonItemId];
+
+    // 5. 执行数据库更新 (扣除宝箱、扣除余额、增加物品)
+    // 扣除宝箱
+    const { error: updateCaseError } = await supabase
+      .from('user_cases')
+      .update({ quantity: userCase.quantity - 1 })
+      .eq('id', userCase.id);
+
+    if (updateCaseError) throw updateCaseError;
+
+    // 扣除余额
+    const { error: updateBalanceError } = await supabase
+      .from('users')
+      .update({ balance: user.balance - price })
+      .eq('id', user.id);
+
+    if (updateBalanceError) throw updateBalanceError;
+
+    // 增加物品到库存
+    const { error: insertInventoryError } = await supabase
+      .from('inventory')
+      .insert({
+        user_id: user.id,
+        item_id: itemUuid,
+        acquired_at: new Date().toISOString()
+      });
+
+    if (insertInventoryError) throw insertInventoryError;
 
     // 生成随机偏移量 (-30 到 30)
     const randomOffset = Math.floor(Math.random() * 60) - 30;

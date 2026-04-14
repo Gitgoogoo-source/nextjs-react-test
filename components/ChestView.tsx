@@ -236,10 +236,13 @@ export default function ChestView() {
       const response = await fetch('/api/chest/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chestId: currentChest.id })
+        body: JSON.stringify({ chestId: currentChest.id, userId: tgUser?.id })
       });
       
-      if (!response.ok) throw new Error('Failed to open chest');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to open chest');
+      }
       
       const { wonItemId, randomOffset } = await response.json();
       
@@ -276,43 +279,10 @@ export default function ChestView() {
         }
       }, 100);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error:', error);
       setIsOpening(false);
-      alert('开启宝箱失败，请重试');
-    }
-  };
-
-  const saveToInventory = async (item: typeof MOCK_PRIZES[0]) => {
-    try {
-      // 必须先完成 Telegram 用户同步，否则 users 表里没有该 telegram_id，会导致无法写入 inventory
-      if (isSyncing) {
-        console.warn('Telegram 用户仍在同步中，跳过写入库存');
-        return;
-      }
-      if (authError || !tgUser?.id) {
-        console.error('Telegram 用户未就绪，无法写入库存:', authError);
-        return;
-      }
-      const telegramUserId = tgUser.id;
-      
-      const response = await fetch('/api/chest/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: telegramUserId, 
-          item: item 
-        })
-      });
-      
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        console.error('Failed to save to inventory API', payload);
-      } else {
-        console.log('Successfully saved to inventory:', item.name);
-      }
-    } catch (error) {
-      console.error('Failed to save to inventory:', error);
+      alert(error.message || '开启宝箱失败，请重试');
     }
   };
 
@@ -327,9 +297,6 @@ export default function ChestView() {
     } catch {}
     
     if (wonItem) {
-      // 动画结束后，自动调用 Supabase 将该物品写入用户的 inventory 表
-      saveToInventory(wonItem);
-
       const duration = 3000;
       const end = Date.now() + duration;
 
@@ -372,6 +339,31 @@ export default function ChestView() {
     setRouletteItems([]);
     x.set(0);
     lastTickIndex.current = -1;
+    
+    // 重新获取宝箱列表以更新数量
+    if (tgUser?.id) {
+      fetch(`/api/chest/list?userId=${tgUser.id}`)
+        .then(res => res.json())
+        .then(({ chests }) => {
+          const generatedChests: typeof CHEST_TYPES = [];
+          if (chests && chests.length > 0) {
+            chests.forEach((chestData: { case_id: string, quantity: number }) => {
+              const baseChest = CHEST_TYPES.find(c => c.id === chestData.case_id);
+              if (baseChest && chestData.quantity > 0) {
+                for (let i = 0; i < chestData.quantity; i++) {
+                  generatedChests.push({
+                    ...baseChest,
+                    uniqueId: `${baseChest.id}-${i}`
+                  } as any);
+                }
+              }
+            });
+          }
+          setUserChests(generatedChests);
+          setCurrentIndex(prev => Math.max(0, Math.min(prev, generatedChests.length - 1)));
+        })
+        .catch(console.error);
+    }
   };
 
   const wrapIndex = (idx: number, len: number) => ((idx % len) + len) % len;
