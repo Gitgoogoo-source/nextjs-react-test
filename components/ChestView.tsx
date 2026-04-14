@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue, useMotionValueEvent } from 'framer-motion';
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -133,6 +133,10 @@ export default function ChestView() {
   const [isOpening, setIsOpening] = useState(false);
   const { isSyncing, error: authError, user: tgUser } = useTelegramAuth();
   
+  // 用户的宝箱列表
+  const [userChests, setUserChests] = useState<typeof CHEST_TYPES>([]);
+  const [isLoadingChests, setIsLoadingChests] = useState(true);
+
   // 轮盘状态
   const [rouletteItems, setRouletteItems] = useState<typeof MOCK_PRIZES>([]);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -145,6 +149,51 @@ export default function ChestView() {
   // 追踪容器的 X 轴位移，用于计算物品的高亮和触发音效
   const x = useMotionValue(0);
   const lastTickIndex = useRef(-1);
+
+  // 获取用户宝箱数据
+  useEffect(() => {
+    async function fetchChests() {
+      if (isSyncing) return;
+      if (!tgUser?.id) {
+        setIsLoadingChests(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/chest/list?userId=${tgUser.id}`);
+        if (!response.ok) throw new Error('Failed to fetch chests');
+        
+        const { chests } = await response.json();
+        
+        // 根据返回的数据生成宝箱列表
+        const generatedChests: typeof CHEST_TYPES = [];
+        
+        if (chests && chests.length > 0) {
+          chests.forEach((chestData: { case_id: string, quantity: number }) => {
+            const baseChest = CHEST_TYPES.find(c => c.id === chestData.case_id);
+            if (baseChest && chestData.quantity > 0) {
+              // 根据数量生成对应个数的宝箱对象
+              for (let i = 0; i < chestData.quantity; i++) {
+                generatedChests.push({
+                  ...baseChest,
+                  // 为了在列表中区分不同的宝箱实例，添加一个唯一的 key
+                  uniqueId: `${baseChest.id}-${i}`
+                } as any);
+              }
+            }
+          });
+        }
+        
+        setUserChests(generatedChests);
+      } catch (error) {
+        console.error('Error fetching chests:', error);
+      } finally {
+        setIsLoadingChests(false);
+      }
+    }
+
+    fetchChests();
+  }, [isSyncing, tgUser?.id]);
 
   // 监听 X 轴变化，触发音效和震动
   useMotionValueEvent(x, "change", (latest) => {
@@ -163,19 +212,19 @@ export default function ChestView() {
   });
 
   const handleNext = () => {
-    if (isOpening) return;
-    setCurrentIndex((prev) => (prev + 1) % CHEST_TYPES.length);
+    if (isOpening || userChests.length === 0) return;
+    setCurrentIndex((prev) => (prev + 1) % userChests.length);
   };
 
   const handlePrev = () => {
-    if (isOpening) return;
-    setCurrentIndex((prev) => (prev - 1 + CHEST_TYPES.length) % CHEST_TYPES.length);
+    if (isOpening || userChests.length === 0) return;
+    setCurrentIndex((prev) => (prev - 1 + userChests.length) % userChests.length);
   };
 
-  const currentChest = CHEST_TYPES[currentIndex];
+  const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
 
   const startOpen = async () => {
-    if (isOpening) return;
+    if (isOpening || !currentChest) return;
     setIsOpening(true);
     setShowResult(false);
     setIsSpinning(false);
@@ -438,10 +487,28 @@ export default function ChestView() {
     );
   }
 
+  if (isLoadingChests || isSyncing) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="text-white text-lg animate-pulse">加载宝箱中...</div>
+      </div>
+    );
+  }
+
+  if (userChests.length === 0) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
+        <Package className="w-24 h-24 text-zinc-700 mb-4" />
+        <h2 className="text-2xl font-bold text-white mb-2">暂无宝箱</h2>
+        <p className="text-zinc-400 text-center">您目前没有任何宝箱，快去获取一些吧！</p>
+      </div>
+    );
+  }
+
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-between px-4 py-6 overflow-hidden">
       {/* 背景光效 */}
-      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest.color} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`} />
+      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`} />
 
       <div className="text-center z-10 shrink-0 mt-2">
         <h2 className="text-2xl font-bold text-white mb-1">选择宝箱</h2>
@@ -469,8 +536,8 @@ export default function ChestView() {
             else if (swipePower > 8000) handlePrev();
           }}
         >
-          {CHEST_TYPES.map((chest, idx) => {
-            const offset = getRelativeOffset(idx, currentIndex, CHEST_TYPES.length);
+          {userChests.map((chest, idx) => {
+            const offset = getRelativeOffset(idx, currentIndex, userChests.length);
             const isCenter = offset === 0;
             const absOffset = Math.abs(offset);
             const isVisible = absOffset <= 2;
@@ -490,12 +557,12 @@ export default function ChestView() {
 
             return (
               <motion.button
-                key={chest.id}
+                key={(chest as any).uniqueId || idx}
                 type="button"
                 onClick={() => {
                   if (isOpening) return;
                   if (idx === currentIndex) return;
-                  setCurrentIndex(wrapIndex(idx, CHEST_TYPES.length));
+                  setCurrentIndex(wrapIndex(idx, userChests.length));
                 }}
                 className="absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 backdrop-blur-md flex flex-col items-center justify-center p-6 shadow-xl transform-gpu will-change-transform focus:outline-none"
                 style={{
@@ -533,18 +600,22 @@ export default function ChestView() {
         </motion.div>
 
         {/* 左右切换按钮 */}
-        <button 
-          onClick={handlePrev}
-          className="absolute left-0 sm:left-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
-        >
-          &#10094;
-        </button>
-        <button 
-          onClick={handleNext}
-          className="absolute right-0 sm:right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
-        >
-          &#10095;
-        </button>
+        {userChests.length > 1 && (
+          <>
+            <button 
+              onClick={handlePrev}
+              className="absolute left-0 sm:left-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
+            >
+              &#10094;
+            </button>
+            <button 
+              onClick={handleNext}
+              className="absolute right-0 sm:right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
+            >
+              &#10095;
+            </button>
+          </>
+        )}
       </div>
 
       {/* 底部操作区 */}
@@ -553,7 +624,7 @@ export default function ChestView() {
         <div className="relative h-11 w-full flex items-center justify-center">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
-              key={currentChest.id}
+              key={currentChest?.id}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1, transition: { duration: 0.18 } }}
               exit={{ opacity: 0, transition: { duration: 0.12 } }}
@@ -561,7 +632,7 @@ export default function ChestView() {
             >
               <div className="flex items-center gap-2 text-lg font-bold text-white bg-black/30 px-6 py-2 rounded-full border border-white/10">
                 <span>开启需要:</span>
-                <span className="text-green-400">{currentChest.price} 叶子</span>
+                <span className="text-green-400">{currentChest?.price} 叶子</span>
               </div>
             </motion.div>
           </AnimatePresence>
@@ -570,7 +641,7 @@ export default function ChestView() {
         <button 
           onClick={startOpen}
           disabled={isOpening}
-          className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest.color} hover:opacity-90 transition-opacity shadow-lg ${currentChest.shadow} disabled:opacity-50 disabled:cursor-not-allowed`}
+          className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest?.color || ''} hover:opacity-90 transition-opacity shadow-lg ${currentChest?.shadow || ''} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isOpening ? '开启中...' : '开启宝箱'}
         </button>
