@@ -450,6 +450,11 @@ export default function ChestView() {
 
       {/* 宝箱展示区 */}
       <div className="relative w-full max-w-[280px] h-64 flex items-center justify-center z-10">
+        {/* 固定选中边框：不跟随滑动，只做选中强调 */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-30">
+          <div className="w-48 h-56 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
+        </div>
+
         {/* 核心滑动区（宝箱动），可超出屏幕边缘后裁切 */}
         <motion.div
           className="relative w-[calc(100vw+160px)] max-w-[520px] h-64 overflow-hidden flex items-center justify-center"
@@ -467,17 +472,19 @@ export default function ChestView() {
           {CHEST_TYPES.map((chest, idx) => {
             const offset = getRelativeOffset(idx, currentIndex, CHEST_TYPES.length);
             const isCenter = offset === 0;
-            const isAdjacent = Math.abs(offset) === 1;
+            const absOffset = Math.abs(offset);
+            const isVisible = absOffset <= 2;
 
-            // 仅渲染前/中/后 + 其余隐藏（opacity: 0）
-            const opacity = isCenter ? 1 : isAdjacent ? 0.4 : 0;
-            const scale = isCenter ? 1 : isAdjacent ? 0.75 : 0.75;
-            const zIndex = isCenter ? 20 : isAdjacent ? 10 : 0;
+            // 让用户在选中的宝箱两边还能看到 2 个缩小宝箱
+            const opacity = isCenter ? 1 : absOffset === 1 ? 0.55 : absOffset === 2 ? 0.28 : 0;
+            const scale = isCenter ? 1 : absOffset === 1 ? 0.78 : absOffset === 2 ? 0.62 : 0.62;
+            const zIndex = isCenter ? 20 : absOffset === 1 ? 10 : absOffset === 2 ? 5 : 0;
 
             // Cover Flow：左右偏移 + 轻微 3D 视差（rotateY + perspective）
-            const translateX = offset === -1 ? '-120%' : offset === 1 ? '120%' : '0%';
-            const rotateY = offset === -1 ? 35 : offset === 1 ? -35 : 0;
-            const translateZ = isCenter ? 50 : 0;
+            const step = 120;
+            const translateX = `${offset * step}%`;
+            const rotateY = offset === 0 ? 0 : Math.max(-55, Math.min(55, -offset * 22));
+            const translateZ = isCenter ? 50 : absOffset === 1 ? 10 : 0;
 
             const ChestIcon = chest.icon;
 
@@ -490,11 +497,11 @@ export default function ChestView() {
                   if (idx === currentIndex) return;
                   setCurrentIndex(wrapIndex(idx, CHEST_TYPES.length));
                 }}
-                className="absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center p-6 shadow-xl transform-gpu will-change-transform focus:outline-none"
+                className="absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 backdrop-blur-md flex flex-col items-center justify-center p-6 shadow-xl transform-gpu will-change-transform focus:outline-none"
                 style={{
                   zIndex,
                   transformPerspective: 1200,
-                  pointerEvents: opacity === 0 ? 'none' : 'auto',
+                  pointerEvents: isVisible ? 'auto' : 'none',
                 }}
                 initial={false}
                 animate={{
