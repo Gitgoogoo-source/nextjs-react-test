@@ -37,9 +37,16 @@ export function useTelegramAuth() {
 
         if (!initData) {
           console.warn('不在 Telegram 环境中或 initData 为空');
-          // 在开发环境中跳过验证
+          // 在开发环境中跳过验证，使用测试用户数据
           if (process.env.NODE_ENV === 'development') {
             console.log('开发环境跳过 Telegram 登录验证');
+            // 设置一个测试用户信息，确保宝箱加载逻辑可以正常工作
+            setUser({
+              id: 999999,
+              first_name: '测试用户',
+              last_name: 'Dev',
+              username: 'dev_user',
+            } as TelegramUser);
             setIsSyncing(false);
             return;
           }
