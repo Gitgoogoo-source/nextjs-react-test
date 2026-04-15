@@ -11,6 +11,9 @@ interface UserState {
   // 全量同步
   sync: (initData: string) => Promise<void>;
 
+  // 服务端回传的可信资产写回（用于开箱等链路，避免 UI 不刷新）
+  setAssetsFromServer: (assets: { balance: number; stars: number }) => void;
+
   // 执行资产交易 (带乐观更新和回滚)
   updateAssets: (
     initData: string,
@@ -25,6 +28,13 @@ export const useUserStore = create<UserState>((set, get) => ({
   isSyncing: false,
   error: null,
 
+  setAssetsFromServer: (assets) => {
+    set({
+      balance: Number(assets.balance) || 0,
+      stars: Number(assets.stars) || 0,
+    });
+  },
+
   sync: async (initData) => {
     set({ isSyncing: true, error: null, initData });
     try {
@@ -36,7 +46,7 @@ export const useUserStore = create<UserState>((set, get) => ({
         ),
       ]);
       if (response.success && response.data) {
-        set({
+        get().setAssetsFromServer({
           balance: Number(response.data.balance),
           stars: Number(response.data.stars),
         });

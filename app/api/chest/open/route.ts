@@ -170,12 +170,29 @@ export async function POST(request: Request) {
       throw rpcError;
     }
 
+    // 7. 再读一遍最新资产，保证前端 UI 立即刷新（不信任前端本地计算）
+    // SECURITY: 资产以数据库为准，避免被篡改的客户端状态污染 UI/逻辑
+    const { data: latestAssets, error: assetsError } = await supabase
+      .from('users')
+      .select('balance, stars')
+      .eq('id', dbUser.id)
+      .maybeSingle();
+
+    if (assetsError || !latestAssets) {
+      console.error('Error fetching latest assets:', assetsError);
+      return NextResponse.json({ error: 'Failed to fetch latest user assets' }, { status: 500 });
+    }
+
     // 生成随机偏移量 (-30 到 30)
     const randomOffset = Math.floor(Math.random() * 60) - 30;
 
     return NextResponse.json({
       wonItem: itemInfo as ItemRow,
-      randomOffset
+      randomOffset,
+      userAssets: {
+        balance: Number(latestAssets.balance || 0),
+        stars: Number(latestAssets.stars || 0),
+      },
     });
   } catch (error: unknown) {
     const err = error as { name?: string };

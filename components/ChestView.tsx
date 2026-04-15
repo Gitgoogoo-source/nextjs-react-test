@@ -138,6 +138,7 @@ export default function ChestView() {
   const [isOpening, setIsOpening] = useState(false);
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
+  const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
   const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce, refresh } = useChestStore();
   
   // 用户的宝箱列表
@@ -241,10 +242,15 @@ export default function ChestView() {
         throw new Error(errData.error || 'Failed to open chest');
       }
       
-      const { wonItem: wonItemFromServer, randomOffset } = (await response.json()) as {
+      const { wonItem: wonItemFromServer, randomOffset, userAssets } = (await response.json()) as {
         wonItem: PrizeViewItem;
         randomOffset: number;
+        userAssets?: { balance: number; stars: number };
       };
+
+      // 关键修复：开箱成功后，立即用服务端回传的最新资产刷新顶部 UI
+      // SECURITY: 资产只接受服务端回传（DB 真实值），前端不做任何结算
+      if (userAssets) setAssetsFromServer(userAssets);
       
       // 生成 50 个物品，前 44 个随机展示
       const items: PrizeViewItem[] = Array.from({ length: 50 }).map((_, i) => {
@@ -350,6 +356,12 @@ export default function ChestView() {
       refresh(initData).catch((e) => {
         console.error(e);
         alert('刷新宝箱失败，请重试');
+      });
+
+      // 关键修复：同时同步一次用户资产（balance/stars），确保顶部展示立即更新
+      // SECURITY: 以服务端验签后的查询结果为准，避免被篡改的前端状态污染
+      useUserStore.getState().sync(initData).catch((e) => {
+        console.error(e);
       });
     }
   };
