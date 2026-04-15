@@ -34,8 +34,14 @@ export function useTelegramAuth() {
             parsedUser = anyLp.initData.user as TelegramUser;
           }
         } catch (e) {
+          // ignore and fallback to window.Telegram below
+        }
+
+        // 兜底：即使 retrieveLaunchParams 成功但 initDataRaw 为空，也要再从 Telegram WebApp 取一次
+        // SECURITY: initData 仅作为服务端验签输入，服务端会校验签名防止伪造
+        if (!initData) {
           const win = window as any;
-          if (win.Telegram?.WebApp?.initData) {
+          if (typeof win?.Telegram?.WebApp?.initData === 'string' && win.Telegram.WebApp.initData.length > 0) {
             initData = win.Telegram.WebApp.initData;
           }
         }
