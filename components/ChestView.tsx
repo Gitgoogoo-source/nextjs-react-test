@@ -129,7 +129,7 @@ const RouletteItem = ({ item, idx, x, itemWidth }: { item: typeof MOCK_PRIZES[0]
 export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isOpening, setIsOpening] = useState(false);
-  const { isSyncing, error: authError, user: tgUser } = useTelegramAuth();
+  const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
   
   // 用户的宝箱列表
@@ -531,6 +531,22 @@ export default function ChestView() {
     return (
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="text-white text-lg animate-pulse">加载宝箱中...</div>
+      </div>
+    );
+  }
+
+  if (chestLoadError) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
+        <Package className="w-20 h-20 text-zinc-700 mb-4" />
+        <h2 className="text-xl font-bold text-white mb-2">加载失败</h2>
+        <p className="text-zinc-400 text-center mb-6">{chestLoadError}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-6 py-3 rounded-xl font-bold text-white bg-zinc-800/80 backdrop-blur-md hover:bg-zinc-700/80 border border-zinc-600 transition-colors shadow-lg active:scale-95"
+        >
+          刷新重试
+        </button>
       </div>
     );
   }
