@@ -6,6 +6,7 @@ import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
+import { useChestStore, type ChestListItem } from '@/store/useChestStore';
 
 // SECURITY: 前端不再硬编码价格，价格从数据库通过 API 获取
 // 此配置仅包含静态 UI 属性（颜色、图标等）
@@ -16,20 +17,8 @@ const CHEST_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>
   legend: Crown,
 };
 
-// API 返回的宝箱类型定义
-interface ChestData {
-  case_id: string;
-  case_key: string;
-  quantity: number;
-  price: number;
-  name: string;
-  color: string;
-  shadow: string;
-  description: string;
-}
-
 // 用户宝箱实例类型（包含前端渲染需要的完整信息）
-interface UserChestInstance extends ChestData {
+interface UserChestInstance extends ChestListItem {
   uniqueId: string;
   icon: React.ComponentType<{ className?: string }>;
 }
@@ -131,11 +120,10 @@ export default function ChestView() {
   const [isOpening, setIsOpening] = useState(false);
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
+  const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce, refresh } = useChestStore();
   
   // 用户的宝箱列表
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
-  const [isLoadingChests, setIsLoadingChests] = useState(true);
-  const [chestLoadError, setChestLoadError] = useState<string | null>(null);
 
   // 轮盘状态
   const [rouletteItems, setRouletteItems] = useState<typeof MOCK_PRIZES>([]);
@@ -150,67 +138,35 @@ export default function ChestView() {
   const x = useMotionValue(0);
   const lastTickIndex = useRef(-1);
 
-  // 获取用户宝箱数据（从后端 API 获取价格和详情）
+  // 登录后只加载一次；切换 Tab 重新 mount 也不会重复请求
   useEffect(() => {
-    async function fetchChests() {
-      if (isSyncing) return;
-      if (!initData) {
-        setIsLoadingChests(false);
-        return;
-      }
+    if (isSyncing) return;
+    if (!initData) return;
+    if (hasLoaded) return;
+    // 兜底：即使某些情况下登录流程没触发 loadOnce，这里也能保证只请求一次
+    loadOnce(initData).catch((e) => console.error(e));
+  }, [isSyncing, initData, hasLoaded, loadOnce]);
 
-      try {
-        setChestLoadError(null);
-        const response = await fetch(`/api/chest/list`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // SECURITY: 只传 initData，服务端验签后取 userId，拒绝伪造
-          body: JSON.stringify({ initData }),
-        });
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || 'Failed to fetch chests');
+  // 将“带数量的宝箱类型列表”展开成“单个宝箱实例列表”供 UI 滑动展示
+  useEffect(() => {
+    const generatedChests: UserChestInstance[] = [];
+    if (Array.isArray(chests) && chests.length > 0) {
+      chests.forEach((chestData) => {
+        if (chestData.quantity > 0) {
+          for (let i = 0; i < chestData.quantity; i++) {
+            generatedChests.push({
+              ...chestData,
+              quantity: 1, // 单个实例
+              uniqueId: `${chestData.case_id}-${i}`,
+              icon: CHEST_ICON_MAP[chestData.case_key] || Package,
+            });
+          }
         }
-        
-        const { chests } = await response.json();
-        
-        // 根据返回的数据生成宝箱列表
-        // SECURITY: 价格和其他数据都来自数据库（后端）
-        const generatedChests: UserChestInstance[] = [];
-        
-        if (chests && chests.length > 0) {
-          chests.forEach((chestData: ChestData) => {
-            if (chestData.quantity > 0) {
-              // 根据数量生成对应个数的宝箱对象
-              for (let i = 0; i < chestData.quantity; i++) {
-                generatedChests.push({
-                  case_id: chestData.case_id,
-                  case_key: chestData.case_key,
-                  quantity: 1, // 单个实例
-                  price: chestData.price, // SECURITY: 来自数据库的价格
-                  name: chestData.name,
-                  color: chestData.color,
-                  shadow: chestData.shadow,
-                  description: chestData.description,
-                  uniqueId: `${chestData.case_id}-${i}`,
-                  icon: CHEST_ICON_MAP[chestData.case_key] || Package,
-                });
-              }
-            }
-          });
-        }
-        
-        setUserChests(generatedChests);
-      } catch (error) {
-        console.error('Error fetching chests:', error);
-        setChestLoadError('加载宝箱失败，请刷新重试');
-      } finally {
-        setIsLoadingChests(false);
-      }
+      });
     }
-
-    fetchChests();
-  }, [isSyncing, initData]);
+    setUserChests(generatedChests);
+    setCurrentIndex((prev) => Math.max(0, Math.min(prev, generatedChests.length - 1)));
+  }, [chests]);
 
   // 监听 X 轴变化，触发音效和震动
   useMotionValueEvent(x, "change", (latest) => {
@@ -367,50 +323,13 @@ export default function ChestView() {
     x.set(0);
     lastTickIndex.current = -1;
     
-    // 重新获取宝箱列表以更新数量和价格
-    // SECURITY: 确保重新从服务器获取最新的价格
+    // 开启宝箱后需要同步数量变化：强制从后端刷新一次
+    // SECURITY: 仍只传 initData，服务端验签后返回可信的最新数据
     if (initData) {
-      fetch(`/api/chest/list`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData }),
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to fetch chests');
-          }
-          return res.json();
-        })
-        .then(({ chests }) => {
-          const generatedChests: UserChestInstance[] = [];
-          if (chests && chests.length > 0) {
-            chests.forEach((chestData: ChestData) => {
-              if (chestData.quantity > 0) {
-                for (let i = 0; i < chestData.quantity; i++) {
-                  generatedChests.push({
-                    case_id: chestData.case_id,
-                    case_key: chestData.case_key,
-                    quantity: 1,
-                    price: chestData.price, // SECURITY: 来自数据库的最新价格
-                    name: chestData.name,
-                    color: chestData.color,
-                    shadow: chestData.shadow,
-                    description: chestData.description,
-                    uniqueId: `${chestData.case_id}-${i}`,
-                    icon: CHEST_ICON_MAP[chestData.case_key] || Package,
-                  });
-                }
-              }
-            });
-          }
-          setUserChests(generatedChests);
-          setCurrentIndex(prev => Math.max(0, Math.min(prev, generatedChests.length - 1)));
-        })
-        .catch((e) => {
-          console.error(e);
-          alert('刷新宝箱失败，请重试');
-        });
+      refresh(initData).catch((e) => {
+        console.error(e);
+        alert('刷新宝箱失败，请重试');
+      });
     }
   };
 

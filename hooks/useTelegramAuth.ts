@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useUserStore } from '@/store/useUserStore';   // 使用 Zustand Store
 import { retrieveLaunchParams } from '@telegram-apps/sdk';
 import { TelegramUser } from '@/lib/telegram';
+import { useChestStore } from '@/store/useChestStore';
 
 export function useTelegramAuth() {
   const { isSyncing: storeSyncing, sync: syncStore, error: storeError } = useUserStore();
@@ -98,6 +99,10 @@ export function useTelegramAuth() {
 
         // 调用 Zustand Store 的 sync 方法，它内部会调用 syncUserAssets 并更新状态
         await syncStore(initData);
+
+        // 登录成功后，只执行一次“从后端获取用户宝箱数据”
+        // SECURITY: 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
+        await useChestStore.getState().loadOnce(initData);
         
       } catch (err: unknown) {
         console.error('Initialization error:', err);
