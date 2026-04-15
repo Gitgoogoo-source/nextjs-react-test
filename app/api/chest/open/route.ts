@@ -142,6 +142,10 @@ export async function POST(request: Request) {
     }
 
     const itemUuid = ITEM_ID_MAP[wonItemId];
+    if (!itemUuid) {
+      // SECURITY: 服务器端奖品映射缺失时直接拒绝，避免写入异常/不可预测行为
+      return NextResponse.json({ error: 'Server prize mapping error' }, { status: 500 });
+    }
 
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
     // 这样可以避免并发请求导致的余额或宝箱数量超扣问题
@@ -154,6 +158,14 @@ export async function POST(request: Request) {
 
     if (rpcError) {
       console.error('RPC Error:', rpcError);
+      // SECURITY: PostgREST rpc 对同名函数重载不稳定，需保证数据库只保留一个签名
+      const msg = rpcError.message || '';
+      if (msg.includes('schema cache') || msg.includes('Could not find the function')) {
+        return NextResponse.json(
+          { error: 'Server RPC misconfigured (open_chest_secure)' },
+          { status: 500 }
+        );
+      }
       // 根据错误信息返回对应的状态
       if (rpcError.message.includes('Insufficient balance')) {
         return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
