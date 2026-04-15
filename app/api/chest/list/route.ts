@@ -3,6 +3,17 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { z } from 'zod';
 
+interface UserCaseRow {
+  case_id: string; // uuid string
+  quantity: number;
+}
+
+interface CaseRow {
+  id: string; // uuid string
+  price: number | string;
+  case_key: string | null;
+}
+
 // 宝箱类型的前端配置映射（静态属性：颜色、图标、描述等）
 // SECURITY: 不包含价格，价格必须从数据库 cases 表读取
 const CHEST_TYPE_CONFIG: Record<string, {
@@ -90,35 +101,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
-    // 3. 从数据库 cases 表读取宝箱价格（SECURITY: 确保价格与数据库一致）
-    const caseIds = (userChests || []).map(c => c.case_id);
-    let chestDetails: Record<string, { price: number }> = {};
-    
+    // 3. 从数据库 cases 表读取宝箱价格与 case_key（SECURITY: 确保价格与数据库一致）
+    const typedUserChests = (userChests || []) as UserCaseRow[];
+    const caseIds = typedUserChests.map((c) => c.case_id).filter(Boolean);
+    const chestDetails: Record<string, { price: number; case_key: string | null }> = {};
+
     if (caseIds.length > 0) {
       const { data: casesData, error: casesError } = await supabase
         .from('cases')
-        .select('id, price')
+        .select('id, price, case_key')
         .in('id', caseIds);
-      
-      if (!casesError && casesData) {
-        casesData.forEach(c => {
-          chestDetails[c.id] = { price: c.price };
-        });
+
+      if (casesError) {
+        console.error('Error fetching cases:', casesError);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
       }
+
+      (casesData || []).forEach((c) => {
+        const row = c as CaseRow;
+        chestDetails[row.id] = { price: Number(row.price) || 0, case_key: row.case_key ?? null };
+      });
     }
 
-    // 4. 合并用户宝箱数据和数据库价格信息
-    const enrichedChests = (userChests || []).map(chest => {
-      const config = CHEST_TYPE_CONFIG[chest.case_id] || {
+    // 4. 合并用户宝箱数据和数据库信息
+    const enrichedChests = typedUserChests.map((chest) => {
+      const details = chestDetails[chest.case_id] || { price: 0, case_key: null };
+      const caseKey = details.case_key || 'unknown';
+
+      const config = CHEST_TYPE_CONFIG[caseKey] || {
         name: '未知宝箱',
         color: 'from-gray-400 to-gray-600',
         shadow: 'shadow-gray-500/50',
         description: '神秘宝箱',
       };
-      const details = chestDetails[chest.case_id] || { price: 0 };
-      
+
       return {
+        // 统一：case_id 为 UUID（来自数据库主键）
         case_id: chest.case_id,
+        // 兼容 UI 映射：使用 cases.case_key（原 normal/rare/...）
+        case_key: caseKey,
         quantity: chest.quantity,
         // SECURITY: 价格来自数据库，而非客户端
         price: details.price,
@@ -127,8 +148,9 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true, chests: enrichedChests });
-  } catch (error: any) {
-    if (error?.name === 'ZodError') {
+  } catch (error: unknown) {
+    const err = error as { name?: string };
+    if (err?.name === 'ZodError') {
       return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
     }
     console.error('Error in chest list route:', error);

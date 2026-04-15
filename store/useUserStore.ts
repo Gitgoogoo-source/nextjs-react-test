@@ -43,9 +43,13 @@ export const useUserStore = create<UserState>((set, get) => ({
         return;
       }
       set({ error: response.error || "同步失败" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Store sync error:", err);
-      set({ error: err.message || "同步失败" });
+      const message =
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message?: unknown }).message || '同步失败')
+          : '同步失败';
+      set({ error: message });
     } finally {
       set({ isSyncing: false });
     }
@@ -71,12 +75,16 @@ export const useUserStore = create<UserState>((set, get) => ({
 
       // 更新为最终服务器确认的余额
       set({ [params.type]: Number(response.newBalance) });
-    } catch (err: any) {
+    } catch (err: unknown) {
       // 4. 回滚状态
+      const message =
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message?: unknown }).message || '资产更新失败')
+          : '资产更新失败';
       set({ 
         balance: previousBalance, 
         stars: previousStars,
-        error: err.message 
+        error: message 
       });
       console.error("Store update error (rolled back):", err);
       // 可选：抛出错误让组件显示 Toast

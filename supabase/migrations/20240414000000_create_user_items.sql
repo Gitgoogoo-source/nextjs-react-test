@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS user_items (
 
 CREATE OR REPLACE FUNCTION open_chest_secure(
   p_user_id uuid,
-  p_chest_id text,
+  p_chest_id uuid,
   p_price integer,
   p_item_id uuid
 ) RETURNS json AS $$

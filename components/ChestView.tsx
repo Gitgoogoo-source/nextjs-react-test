@@ -19,6 +19,7 @@ const CHEST_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>
 // API 返回的宝箱类型定义
 interface ChestData {
   case_id: string;
+  case_key: string;
   quantity: number;
   price: number;
   name: string;
@@ -184,6 +185,7 @@ export default function ChestView() {
               for (let i = 0; i < chestData.quantity; i++) {
                 generatedChests.push({
                   case_id: chestData.case_id,
+                  case_key: chestData.case_key,
                   quantity: 1, // 单个实例
                   price: chestData.price, // SECURITY: 来自数据库的价格
                   name: chestData.name,
@@ -191,7 +193,7 @@ export default function ChestView() {
                   shadow: chestData.shadow,
                   description: chestData.description,
                   uniqueId: `${chestData.case_id}-${i}`,
-                  icon: CHEST_ICON_MAP[chestData.case_id] || Package,
+                  icon: CHEST_ICON_MAP[chestData.case_key] || Package,
                 });
               }
             }
@@ -256,7 +258,7 @@ export default function ChestView() {
       const response = await fetch('/api/chest/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // SECURITY: 只传递宝箱类型ID，后端会从数据库读取价格进行验证
+        // SECURITY: 只传递宝箱 UUID（cases.id），后端会从数据库读取价格与类型进行验证
         body: JSON.stringify({ chestId: currentChest.case_id, initData })
       });
       
@@ -300,10 +302,14 @@ export default function ChestView() {
         }
       }, 100);
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error:', error);
       setIsOpening(false);
-      alert(error.message || '开启宝箱失败，请重试');
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message?: unknown }).message || '开启宝箱失败，请重试')
+          : '开启宝箱失败，请重试';
+      alert(message);
     }
   };
 
@@ -369,7 +375,13 @@ export default function ChestView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ initData }),
       })
-        .then(res => res.json())
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to fetch chests');
+          }
+          return res.json();
+        })
         .then(({ chests }) => {
           const generatedChests: UserChestInstance[] = [];
           if (chests && chests.length > 0) {
@@ -378,6 +390,7 @@ export default function ChestView() {
                 for (let i = 0; i < chestData.quantity; i++) {
                   generatedChests.push({
                     case_id: chestData.case_id,
+                    case_key: chestData.case_key,
                     quantity: 1,
                     price: chestData.price, // SECURITY: 来自数据库的最新价格
                     name: chestData.name,
@@ -385,7 +398,7 @@ export default function ChestView() {
                     shadow: chestData.shadow,
                     description: chestData.description,
                     uniqueId: `${chestData.case_id}-${i}`,
-                    icon: CHEST_ICON_MAP[chestData.case_id] || Package,
+                    icon: CHEST_ICON_MAP[chestData.case_key] || Package,
                   });
                 }
               }
@@ -394,7 +407,10 @@ export default function ChestView() {
           setUserChests(generatedChests);
           setCurrentIndex(prev => Math.max(0, Math.min(prev, generatedChests.length - 1)));
         })
-        .catch(console.error);
+        .catch((e) => {
+          console.error(e);
+          alert('刷新宝箱失败，请重试');
+        });
     }
   };
 
@@ -581,7 +597,7 @@ export default function ChestView() {
 
             return (
               <motion.button
-                key={(chest as any).uniqueId || idx}
+                key={chest.uniqueId}
                 type="button"
                 onClick={() => {
                   if (isOpening) return;

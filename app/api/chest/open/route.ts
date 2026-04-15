@@ -48,7 +48,8 @@ const ITEM_ID_MAP: Record<number, string> = {
 };
 
 const openChestSchema = z.object({
-  chestId: z.string().min(1),
+  // 统一：前端只传 cases.id（UUID）
+  chestId: z.string().uuid(),
   initData: z.string().min(1),
 });
 
@@ -62,11 +63,6 @@ export async function POST(request: Request) {
     if (!isValid || !tgUser) {
       return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
     }
-    
-    // SECURITY: 验证宝箱类型存在且合法
-    if (!DROP_RATES[chestId as keyof typeof DROP_RATES]) {
-      return NextResponse.json({ error: 'Invalid chest type' }, { status: 400 });
-    }
 
     let supabase;
     try {
@@ -79,11 +75,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. 从数据库获取宝箱的实时价格（SECURITY: 防止客户端篡改价格）
+    // 1. 从数据库获取宝箱的实时价格与 case_key（SECURITY: 防止客户端篡改价格）
     const { data: chestInfo, error: chestInfoError } = await supabase
       .from('cases')
-      .select('id, price')
-      .eq('id', chestId)
+      .select('id, price, case_key')
+      .eq('id', chestId) // UUID
       .maybeSingle();
 
     if (chestInfoError || !chestInfo) {
@@ -95,6 +91,12 @@ export async function POST(request: Request) {
     const price = chestInfo.price || 0;
     if (price <= 0) {
       return NextResponse.json({ error: 'Invalid chest price' }, { status: 400 });
+    }
+
+    // SECURITY: 掉率与宝箱类型以 cases.case_key 为准，避免 UUID/类型混用
+    const caseKey = (chestInfo.case_key || '') as keyof typeof DROP_RATES;
+    if (!caseKey || !DROP_RATES[caseKey]) {
+      return NextResponse.json({ error: 'Invalid chest type' }, { status: 400 });
     }
 
     // 2. 获取用户信息
@@ -113,7 +115,7 @@ export async function POST(request: Request) {
       .from('user_cases')
       .select('id, quantity')
       .eq('user_id', dbUser.id)
-      .eq('case_id', chestId)
+      .eq('case_id', chestId) // UUID
       .maybeSingle();
 
     if (caseError || !userCase || userCase.quantity <= 0) {
@@ -126,7 +128,7 @@ export async function POST(request: Request) {
     }
 
     // 4. 计算随机结果
-    const rates = DROP_RATES[chestId as keyof typeof DROP_RATES];
+    const rates = DROP_RATES[caseKey];
     const rand = Math.random() * 100;
     let cumulative = 0;
     let wonItemId = 1;
@@ -143,9 +145,9 @@ export async function POST(request: Request) {
 
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
     // 这样可以避免并发请求导致的余额或宝箱数量超扣问题
-    const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
+    const { error: rpcError } = await supabase.rpc('open_chest_secure', {
       p_user_id: dbUser.id,
-      p_chest_id: chestId,
+      p_chest_id: chestId, // UUID
       p_price: price,
       p_item_id: itemUuid
     });
@@ -169,8 +171,9 @@ export async function POST(request: Request) {
       wonItemId,
       randomOffset
     });
-  } catch (error: any) {
-    if (error?.name === 'ZodError') {
+  } catch (error: unknown) {
+    const err = error as { name?: string };
+    if (err?.name === 'ZodError') {
       return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
     }
     console.error('Error opening chest:', error);

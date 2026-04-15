@@ -44,11 +44,13 @@ export async function syncUserAssets(initData: string) {
   };
 }
 
+type AssetChangeParams = z.infer<typeof assetChangeSchema>;
+
 /**
  * 执行资产变更 (消费或奖励)
  * 使用 RPC 确保 users 表更新与 resource_transactions 插入的原子性
  */
-export async function processAssetChange(initData: string, params: any) {
+export async function processAssetChange(initData: string, params: AssetChangeParams) {
   const { isValid, user } = validateTelegramWebAppData(initData);
   if (!isValid || !user) {
     return { success: false, error: '身份验证失败' };
