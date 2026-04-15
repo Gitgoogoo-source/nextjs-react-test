@@ -23,6 +23,8 @@ interface ChestState {
   loadOnce: (initData: string) => Promise<void>;
   // 用于手动刷新/开启宝箱后刷新，强制走后端获取最新数量与价格
   refresh: (initData: string) => Promise<void>;
+  // 静默刷新：不触发 isLoading（用于开箱动画期间后台刷新，避免主界面出现“加载宝箱中...”）
+  refreshSilent: (initData: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -75,6 +77,26 @@ export const useChestStore = create<ChestState>((set, get) => ({
       set({ error: message });
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  refreshSilent: async (initData) => {
+    if (!initData) return;
+    // SECURITY: 仍只传 initData，服务端验签后取 userId；这里只是避免 loading UI
+    try {
+      const chests = await fetchChestList(initData);
+      set({
+        chests,
+        hasLoaded: true,
+        loadedAt: Date.now(),
+      });
+    } catch (e: unknown) {
+      // 静默失败：只记录 error，不中断 UI
+      const message =
+        typeof e === 'object' && e !== null && 'message' in e
+          ? String((e as { message?: unknown }).message || '加载宝箱失败')
+          : '加载宝箱失败';
+      set({ error: message });
     }
   },
 

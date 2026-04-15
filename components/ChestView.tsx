@@ -139,7 +139,7 @@ export default function ChestView() {
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
   const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
-  const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce, refresh } = useChestStore();
+  const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce } = useChestStore();
   
   // 用户的宝箱列表
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
@@ -229,7 +229,7 @@ export default function ChestView() {
     lastTickIndex.current = -1;
     
     try {
-      // 请求后端计算结果
+      // SECURITY: 点击后立刻向服务端提交开箱申请（前端不做结算/不传结果）
       const response = await fetch('/api/chest/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -251,6 +251,11 @@ export default function ChestView() {
       // 关键修复：开箱成功后，立即用服务端回传的最新资产刷新顶部 UI
       // SECURITY: 资产只接受服务端回传（DB 真实值），前端不做任何结算
       if (userAssets) setAssetsFromServer(userAssets);
+
+      // 静默同步最新资产/宝箱数量：在开箱动画期间后台完成，避免回主界面出现“同步数据中/加载宝箱中”
+      // SECURITY: 仍然只通过 initData 让服务端验签后返回可信数据
+      void useChestStore.getState().refreshSilent(initData);
+      void useUserStore.getState().syncSilent(initData);
       
       // 生成 50 个物品，前 44 个随机展示
       const items: PrizeViewItem[] = Array.from({ length: 50 }).map((_, i) => {
@@ -349,21 +354,6 @@ export default function ChestView() {
     setRouletteItems([]);
     x.set(0);
     lastTickIndex.current = -1;
-    
-    // 开启宝箱后需要同步数量变化：强制从后端刷新一次
-    // SECURITY: 仍只传 initData，服务端验签后返回可信的最新数据
-    if (initData) {
-      refresh(initData).catch((e) => {
-        console.error(e);
-        alert('刷新宝箱失败，请重试');
-      });
-
-      // 关键修复：同时同步一次用户资产（balance/stars），确保顶部展示立即更新
-      // SECURITY: 以服务端验签后的查询结果为准，避免被篡改的前端状态污染
-      useUserStore.getState().sync(initData).catch((e) => {
-        console.error(e);
-      });
-    }
   };
 
   const wrapIndex = (idx: number, len: number) => ((idx % len) + len) % len;

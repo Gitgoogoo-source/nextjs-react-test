@@ -11,6 +11,9 @@ interface UserState {
   // 全量同步
   sync: (initData: string) => Promise<void>;
 
+  // 静默同步：不触发全局 isSyncing（用于开箱动画期间后台刷新，避免“同步数据中”提示）
+  syncSilent: (initData: string) => Promise<void>;
+
   // 服务端回传的可信资产写回（用于开箱等链路，避免 UI 不刷新）
   setAssetsFromServer: (assets: { balance: number; stars: number }) => void;
 
@@ -62,6 +65,35 @@ export const useUserStore = create<UserState>((set, get) => ({
       set({ error: message });
     } finally {
       set({ isSyncing: false });
+    }
+  },
+
+  syncSilent: async (initData) => {
+    // SECURITY: 仍然由服务端根据 initData 验签后返回资产；这里只是避免 UI 出现“同步中”提示
+    set({ error: null, initData });
+    try {
+      const response = await Promise.race([
+        syncUserAssets(initData),
+        new Promise<{ success: false; error: string }>((resolve) =>
+          setTimeout(() => resolve({ success: false, error: '同步超时，请重试' }), 12_000)
+        ),
+      ]);
+      if (response.success && response.data) {
+        get().setAssetsFromServer({
+          balance: Number(response.data.balance),
+          stars: Number(response.data.stars),
+        });
+        return;
+      }
+      // 静默失败：只记录 error，不阻塞 UI
+      set({ error: response.error || '同步失败' });
+    } catch (err: unknown) {
+      console.error('Store syncSilent error:', err);
+      const message =
+        typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message?: unknown }).message || '同步失败')
+          : '同步失败';
+      set({ error: message });
     }
   },
 
