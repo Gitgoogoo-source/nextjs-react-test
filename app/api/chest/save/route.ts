@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { validateTelegramWebAppData } from '@/lib/telegram';
+import { z } from 'zod';
 
 // 映射前端的 mock ID 到数据库的 UUID
 const ITEM_ID_MAP: Record<number, string> = {
@@ -10,13 +12,27 @@ const ITEM_ID_MAP: Record<number, string> = {
   5: '55555555-5555-5555-5555-555555555555',
 };
 
+const saveSchema = z.object({
+  // 兼容旧前端：仍然可能传 userId，但服务端不信任它
+  userId: z.any().optional(),
+  initData: z.string().min(1),
+  item: z.object({
+    id: z.number().int(),
+  }),
+});
+
 export async function POST(request: Request) {
   try {
-    const { userId: telegramUserId, item } = await request.json();
-    
-    if (!telegramUserId || !item || !item.id) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // SECURITY: 本接口属于旧逻辑（硬编码扣费 100），为避免错账与被滥用，强制要求 initData 并仅用于“发货兜底”
+    const body = await request.json();
+    const { initData, item } = saveSchema.parse(body);
+
+    const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
+    if (!isValid || !tgUser) {
+      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
     }
+    
+    if (!item?.id) return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
 
     // 注意：当前数据库开启了 RLS，但未配置 users/user_items 的策略。
     // 因此服务端写入必须使用 service role（管理员客户端）绕过 RLS。
@@ -40,7 +56,7 @@ export async function POST(request: Request) {
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, balance')
-      .eq('telegram_id', telegramUserId)
+      .eq('telegram_id', tgUser.id.toString())
       .maybeSingle();
 
     if (userError || !user) {
@@ -51,25 +67,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. 扣除余额 (假设普通宝箱价格为 100，这里可以根据实际逻辑调整，或者在 open 接口扣除)
-    // 注意：在实际商业应用中，扣钱和发货应该在一个事务(Transaction)中完成，或者使用 RPC
-    // 这里为了演示，我们简单地在发货时扣除 100 余额
-    const newBalance = user.balance - 100;
-    if (newBalance < 0) {
-      // 余额不足
-      // return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
-      // 考虑到这是测试环境，我们允许负数或者不阻断
-    }
-
-    // 更新余额
-    const { error: balanceError } = await supabase
-      .from('users')
-      .update({ balance: newBalance })
-      .eq('id', user.id);
-    if (balanceError) {
-      console.error('Error updating balance:', balanceError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
-    }
+    // SECURITY: 禁用旧的“硬编码扣费”逻辑，避免错账/被利用；只做物品入库兜底
 
     // 3. 写入用户的 user_items 表
     // 先查询是否已有该物品
@@ -119,7 +117,10 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true, data });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === 'ZodError') {
+      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+    }
     console.error('Error in save route:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

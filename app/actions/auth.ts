@@ -27,7 +27,7 @@ export async function syncTelegramUser(initData: string) {
     const { data: existingUser, error: fetchError } = await supabase
       .from('users')
       .select('*')
-      .eq('telegram_id', user.id)
+      .eq('telegram_id', user.id.toString())
       .single();
 
     if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 means no rows returned
@@ -49,7 +49,7 @@ export async function syncTelegramUser(initData: string) {
           updated_at: now,
           balance: typeof existingUser.balance === 'number' ? existingUser.balance : 1000,
         })
-        .eq('telegram_id', user.id);
+        .eq('telegram_id', user.id.toString());
 
       if (updateError) {
         console.error('Error updating user:', updateError);
@@ -60,7 +60,7 @@ export async function syncTelegramUser(initData: string) {
       const { error: insertError } = await supabase
         .from('users')
         .insert({
-          telegram_id: user.id,
+          telegram_id: user.id.toString(),
           username: user.username,
           first_name: user.first_name,
           last_name: user.last_name,

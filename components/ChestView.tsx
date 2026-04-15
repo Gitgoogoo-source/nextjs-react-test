@@ -5,6 +5,7 @@ import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplat
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
+import { useUserStore } from '@/store/useUserStore';
 
 // SECURITY: 前端不再硬编码价格，价格从数据库通过 API 获取
 // 此配置仅包含静态 UI 属性（颜色、图标等）
@@ -128,6 +129,7 @@ export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isOpening, setIsOpening] = useState(false);
   const { isSyncing, error: authError, user: tgUser } = useTelegramAuth();
+  const initData = useUserStore((s) => s.initData);
   
   // 用户的宝箱列表
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
@@ -151,14 +153,19 @@ export default function ChestView() {
   useEffect(() => {
     async function fetchChests() {
       if (isSyncing) return;
-      if (!tgUser?.id) {
+      if (!initData) {
         setIsLoadingChests(false);
         return;
       }
 
       try {
         setChestLoadError(null);
-        const response = await fetch(`/api/chest/list?userId=${tgUser.id}`);
+        const response = await fetch(`/api/chest/list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // SECURITY: 只传 initData，服务端验签后取 userId，拒绝伪造
+          body: JSON.stringify({ initData }),
+        });
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData.error || 'Failed to fetch chests');
@@ -201,7 +208,7 @@ export default function ChestView() {
     }
 
     fetchChests();
-  }, [isSyncing, tgUser?.id]);
+  }, [isSyncing, initData]);
 
   // 监听 X 轴变化，触发音效和震动
   useMotionValueEvent(x, "change", (latest) => {
@@ -234,6 +241,10 @@ export default function ChestView() {
 
   const startOpen = async () => {
     if (isOpening || !currentChest) return;
+    if (!initData) {
+      alert('未获取到 Telegram 登录信息，请重新进入');
+      return;
+    }
     setIsOpening(true);
     setShowResult(false);
     setIsSpinning(false);
@@ -246,7 +257,7 @@ export default function ChestView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // SECURITY: 只传递宝箱类型ID，后端会从数据库读取价格进行验证
-        body: JSON.stringify({ chestId: currentChest.case_id, userId: tgUser?.id })
+        body: JSON.stringify({ chestId: currentChest.case_id, initData })
       });
       
       if (!response.ok) {
@@ -352,8 +363,12 @@ export default function ChestView() {
     
     // 重新获取宝箱列表以更新数量和价格
     // SECURITY: 确保重新从服务器获取最新的价格
-    if (tgUser?.id) {
-      fetch(`/api/chest/list?userId=${tgUser.id}`)
+    if (initData) {
+      fetch(`/api/chest/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+      })
         .then(res => res.json())
         .then(({ chests }) => {
           const generatedChests: UserChestInstance[] = [];

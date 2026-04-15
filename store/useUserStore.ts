@@ -4,6 +4,7 @@ import { syncUserAssets, processAssetChange } from "@/actions/asset-actions";
 interface UserState {
   balance: number;
   stars: number;
+  initData: string | null;
   isSyncing: boolean;
   error: string | null;
 
@@ -20,23 +21,27 @@ interface UserState {
 export const useUserStore = create<UserState>((set, get) => ({
   balance: 0,
   stars: 0,
+  initData: null,
   isSyncing: false,
   error: null,
 
   sync: async (initData) => {
-    set({ isSyncing: true, error: null });
+    set({ isSyncing: true, error: null, initData });
     try {
       const response = await syncUserAssets(initData);
       if (response.success && response.data) {
         set({
           balance: Number(response.data.balance),
           stars: Number(response.data.stars),
-          isSyncing: false,
         });
+        return;
       }
+      set({ error: response.error || "同步失败" });
     } catch (err: any) {
       console.error("Store sync error:", err);
-      set({ error: err.message, isSyncing: false });
+      set({ error: err.message || "同步失败" });
+    } finally {
+      set({ isSyncing: false });
     }
   },
 
@@ -54,10 +59,12 @@ export const useUserStore = create<UserState>((set, get) => ({
       // 3. 执行服务器 Action
       const response = await processAssetChange(initData, params);
       
-      if (response.success) {
-        // 更新为最终服务器确认的余额
-        set({ [params.type]: Number(response.newBalance) });
+      if (!response.success) {
+        throw new Error(response.error || "资产更新失败");
       }
+
+      // 更新为最终服务器确认的余额
+      set({ [params.type]: Number(response.newBalance) });
     } catch (err: any) {
       // 4. 回滚状态
       set({ 

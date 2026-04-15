@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { validateTelegramWebAppData } from '@/lib/telegram';
+import { z } from 'zod';
 
 // 宝箱类型的前端配置映射（静态属性：颜色、图标、描述等）
 // SECURITY: 不包含价格，价格必须从数据库 cases 表读取
@@ -35,13 +37,19 @@ const CHEST_TYPE_CONFIG: Record<string, {
   }
 };
 
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const telegramUserId = searchParams.get('userId');
+const listChestsSchema = z.object({
+  initData: z.string().min(1),
+});
 
-    if (!telegramUserId) {
-      return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { initData } = listChestsSchema.parse(body);
+
+    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
+    const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
+    if (!isValid || !tgUser) {
+      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
     }
 
     let supabase;
@@ -59,7 +67,7 @@ export async function GET(request: Request) {
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
-      .eq('telegram_id', telegramUserId)
+      .eq('telegram_id', tgUser.id.toString())
       .maybeSingle();
 
     if (userError || !user) {
@@ -119,7 +127,10 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ success: true, chests: enrichedChests });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === 'ZodError') {
+      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+    }
     console.error('Error in chest list route:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

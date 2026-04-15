@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { validateTelegramWebAppData } from '@/lib/telegram';
+import { z } from 'zod';
 
 // 模拟数据库中的掉率表
 const DROP_RATES = {
@@ -45,13 +47,20 @@ const ITEM_ID_MAP: Record<number, string> = {
   5: '55555555-5555-5555-5555-555555555555',
 };
 
+const openChestSchema = z.object({
+  chestId: z.string().min(1),
+  initData: z.string().min(1),
+});
+
 export async function POST(request: Request) {
   try {
-    const { chestId, userId: telegramUserId } = await request.json();
+    const body = await request.json();
+    const { chestId, initData } = openChestSchema.parse(body);
     
-    // SECURITY: 严格验证输入参数
-    if (!telegramUserId || !chestId) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
+    const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
+    if (!isValid || !tgUser) {
+      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
     }
     
     // SECURITY: 验证宝箱类型存在且合法
@@ -89,13 +98,13 @@ export async function POST(request: Request) {
     }
 
     // 2. 获取用户信息
-    const { data: user, error: userError } = await supabase
+    const { data: dbUser, error: userError } = await supabase
       .from('users')
       .select('id, balance')
-      .eq('telegram_id', telegramUserId)
+      .eq('telegram_id', tgUser.id.toString())
       .maybeSingle();
 
-    if (userError || !user) {
+    if (userError || !dbUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -103,7 +112,7 @@ export async function POST(request: Request) {
     const { data: userCase, error: caseError } = await supabase
       .from('user_cases')
       .select('id, quantity')
-      .eq('user_id', user.id)
+      .eq('user_id', dbUser.id)
       .eq('case_id', chestId)
       .maybeSingle();
 
@@ -112,7 +121,7 @@ export async function POST(request: Request) {
     }
 
     // 4. 检查余额是否足够
-    if (user.balance < price) {
+    if (dbUser.balance < price) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
@@ -135,7 +144,7 @@ export async function POST(request: Request) {
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
     // 这样可以避免并发请求导致的余额或宝箱数量超扣问题
     const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
-      p_user_id: user.id,
+      p_user_id: dbUser.id,
       p_chest_id: chestId,
       p_price: price,
       p_item_id: itemUuid
@@ -160,7 +169,10 @@ export async function POST(request: Request) {
       wonItemId,
       randomOffset
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === 'ZodError') {
+      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+    }
     console.error('Error opening chest:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
