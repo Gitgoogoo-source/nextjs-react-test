@@ -24,6 +24,7 @@ interface UserChestInstance extends ChestListItem {
 }
 
 // CSGO 风格的稀有度颜色，修改为玻璃拟态 (Glassmorphism) 风格
+// 说明：掉率已迁移到数据库 case_items(drop_chance)。这里的列表仅用于轮盘“填充展示”。
 const MOCK_PRIZES = [
   { id: 1, name: '军规级鸭子', color: 'bg-blue-500/20', border: 'border-blue-400/50', shadow: 'shadow-blue-500/50', rarity: 'Mil-Spec', hex: '#3b82f6' },
   { id: 2, name: '受限级鸭子', color: 'bg-purple-500/20', border: 'border-purple-400/50', shadow: 'shadow-purple-500/50', rarity: 'Restricted', hex: '#a855f7' },
@@ -31,6 +32,23 @@ const MOCK_PRIZES = [
   { id: 4, name: '隐秘级鸭子', color: 'bg-red-500/20', border: 'border-red-400/50', shadow: 'shadow-red-500/50', rarity: 'Covert', hex: '#ef4444' },
   { id: 5, name: '罕见级鸭子', color: 'bg-yellow-500/20', border: 'border-yellow-400/50', shadow: 'shadow-yellow-500/50', rarity: 'Rare Special', hex: '#eab308' },
 ];
+
+type PrizeViewItem = {
+  id?: string; // uuid（来自数据库，仅展示用）
+  name: string;
+  color: string;
+  border: string;
+  rarity: string;
+  hex: string;
+};
+
+const ROULETTE_FILLERS: PrizeViewItem[] = MOCK_PRIZES.map((p) => ({
+  name: p.name,
+  color: p.color,
+  border: p.border,
+  rarity: p.rarity,
+  hex: p.hex,
+}));
 
 // 播放短促的滴答声
 const playTickSound = () => {
@@ -72,7 +90,7 @@ const triggerHaptic = () => {
 };
 
 // 单个轮盘物品组件
-const RouletteItem = ({ item, idx, x, itemWidth }: { item: typeof MOCK_PRIZES[0], idx: number, x: MotionValue<number>, itemWidth: number }) => {
+const RouletteItem = ({ item, idx, x, itemWidth }: { item: PrizeViewItem, idx: number, x: MotionValue<number>, itemWidth: number }) => {
   // 当前物品的中心点偏移量
   const centerOffset = (idx * itemWidth) + (itemWidth / 2);
   
@@ -126,10 +144,10 @@ export default function ChestView() {
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
 
   // 轮盘状态
-  const [rouletteItems, setRouletteItems] = useState<typeof MOCK_PRIZES>([]);
+  const [rouletteItems, setRouletteItems] = useState<PrizeViewItem[]>([]);
   const [isSpinning, setIsSpinning] = useState(false);
   const [showResult, setShowResult] = useState(false);
-  const [wonItem, setWonItem] = useState<typeof MOCK_PRIZES[0] | null>(null);
+  const [wonItem, setWonItem] = useState<PrizeViewItem | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const [targetX, setTargetX] = useState(0);
@@ -223,21 +241,24 @@ export default function ChestView() {
         throw new Error(errData.error || 'Failed to open chest');
       }
       
-      const { wonItemId, randomOffset } = await response.json();
+      const { wonItem: wonItemFromServer, randomOffset } = (await response.json()) as {
+        wonItem: PrizeViewItem;
+        randomOffset: number;
+      };
       
       // 生成 50 个物品，前 44 个随机展示
-      const items = Array.from({ length: 50 }).map((_, i) => {
+      const items: PrizeViewItem[] = Array.from({ length: 50 }).map((_, i) => {
         if (i === 44) {
           // 第 45 个 (索引 44) 是中奖物品
-          return MOCK_PRIZES.find(p => p.id === wonItemId) || MOCK_PRIZES[0];
+          return wonItemFromServer;
         }
         // 其他随机填充
         const rand = Math.random() * 100;
-        if (rand < 50) return MOCK_PRIZES[0];
-        if (rand < 75) return MOCK_PRIZES[1];
-        if (rand < 90) return MOCK_PRIZES[2];
-        if (rand < 98) return MOCK_PRIZES[3];
-        return MOCK_PRIZES[4];
+        if (rand < 50) return ROULETTE_FILLERS[0];
+        if (rand < 75) return ROULETTE_FILLERS[1];
+        if (rand < 90) return ROULETTE_FILLERS[2];
+        if (rand < 98) return ROULETTE_FILLERS[3];
+        return ROULETTE_FILLERS[4];
       });
       
       const winIndex = 44;

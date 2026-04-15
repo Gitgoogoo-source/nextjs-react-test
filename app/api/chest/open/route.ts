@@ -3,49 +3,31 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { z } from 'zod';
 
-// 模拟数据库中的掉率表
-const DROP_RATES = {
-  normal: [
-    { id: 1, chance: 70 }, // 军规级鸭子
-    { id: 2, chance: 20 }, // 受限级鸭子
-    { id: 3, chance: 8 },  // 保密级鸭子
-    { id: 4, chance: 1.5 },// 隐秘级鸭子
-    { id: 5, chance: 0.5 },// 罕见级鸭子
-  ],
-  rare: [
-    { id: 1, chance: 30 },
-    { id: 2, chance: 40 },
-    { id: 3, chance: 20 },
-    { id: 4, chance: 8 },
-    { id: 5, chance: 2 },
-  ],
-  exclusive: [
-    { id: 1, chance: 0 },
-    { id: 2, chance: 0 },
-    { id: 3, chance: 30 },
-    { id: 4, chance: 50 },
-    { id: 5, chance: 20 },
-  ],
-  legend: [
-    { id: 1, chance: 0 },
-    { id: 2, chance: 0 },
-    { id: 3, chance: 0 },
-    { id: 4, chance: 0 },
-    { id: 5, chance: 100 },
-  ]
-};
+interface CaseItemRow {
+  item_id: string;
+  drop_chance: number | string;
+}
 
-// SECURITY: 价格不再硬编码，而是从数据库 cases 表读取
-// 这样可以确保前后端价格一致，防止客户端篡改价格
+interface ItemRow {
+  id: string;
+  name: string;
+  rarity: string;
+  color: string;
+  border: string;
+  hex: string;
+}
 
-// 映射前端的 mock ID 到数据库的 UUID
-const ITEM_ID_MAP: Record<number, string> = {
-  1: '11111111-1111-1111-1111-111111111111',
-  2: '22222222-2222-2222-2222-222222222222',
-  3: '33333333-3333-3333-3333-333333333333',
-  4: '44444444-4444-4444-4444-444444444444',
-  5: '55555555-5555-5555-5555-555555555555',
-};
+function pickWeightedItem(rows: { item_id: string; weight: number }[]) {
+  const total = rows.reduce((acc, r) => acc + r.weight, 0);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const rand = Math.random() * total;
+  let cumulative = 0;
+  for (const r of rows) {
+    cumulative += r.weight;
+    if (rand <= cumulative) return r.item_id;
+  }
+  return rows[rows.length - 1]?.item_id ?? null;
+}
 
 const openChestSchema = z.object({
   // 统一：前端只传 cases.id（UUID）
@@ -88,15 +70,29 @@ export async function POST(request: Request) {
     }
 
     // SECURITY: 使用数据库中的价格，而不是前端传来的价格
-    const price = chestInfo.price || 0;
-    if (price <= 0) {
+    const price = BigInt(chestInfo.price || 0);
+    if (price <= BigInt(0)) {
       return NextResponse.json({ error: 'Invalid chest price' }, { status: 400 });
     }
 
-    // SECURITY: 掉率与宝箱类型以 cases.case_key 为准，避免 UUID/类型混用
-    const caseKey = (chestInfo.case_key || '') as keyof typeof DROP_RATES;
-    if (!caseKey || !DROP_RATES[caseKey]) {
-      return NextResponse.json({ error: 'Invalid chest type' }, { status: 400 });
+    // SECURITY: 掉率与奖池以 case_items 为准（后台可配置，避免硬编码与前端篡改）
+    const { data: caseItems, error: caseItemsError } = await supabase
+      .from('case_items')
+      .select('item_id, drop_chance')
+      .eq('case_id', chestId);
+
+    if (caseItemsError) {
+      console.error('Error fetching case_items:', caseItemsError);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+
+    const normalized = (caseItems || [])
+      .map((r) => r as CaseItemRow)
+      .filter((r) => r.item_id && Number(r.drop_chance) > 0)
+      .map((r) => ({ item_id: r.item_id, weight: Number(r.drop_chance) }));
+
+    if (normalized.length === 0) {
+      return NextResponse.json({ error: 'Chest drop table not configured' }, { status: 500 });
     }
 
     // 2. 获取用户信息
@@ -123,28 +119,26 @@ export async function POST(request: Request) {
     }
 
     // 4. 检查余额是否足够
-    if (dbUser.balance < price) {
+    if (BigInt(dbUser.balance ?? 0) < price) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
-    // 4. 计算随机结果
-    const rates = DROP_RATES[caseKey];
-    const rand = Math.random() * 100;
-    let cumulative = 0;
-    let wonItemId = 1;
-    
-    for (const item of rates) {
-      cumulative += item.chance;
-      if (rand <= cumulative) {
-        wonItemId = item.id;
-        break;
-      }
+    // 5. 按数据库权重抽取 item_id（可不要求总和=100，按 total 归一化）
+    const itemUuid = pickWeightedItem(normalized);
+    if (!itemUuid) {
+      return NextResponse.json({ error: 'Chest drop table invalid' }, { status: 500 });
     }
 
-    const itemUuid = ITEM_ID_MAP[wonItemId];
-    if (!itemUuid) {
-      // SECURITY: 服务器端奖品映射缺失时直接拒绝，避免写入异常/不可预测行为
-      return NextResponse.json({ error: 'Server prize mapping error' }, { status: 500 });
+    // 6. 拉取奖品展示信息（前端仅用于展示，不参与任何结算）
+    const { data: itemInfo, error: itemInfoError } = await supabase
+      .from('items')
+      .select('id, name, rarity, color, border, hex')
+      .eq('id', itemUuid)
+      .maybeSingle();
+
+    if (itemInfoError || !itemInfo) {
+      console.error('Error fetching item info:', itemInfoError);
+      return NextResponse.json({ error: 'Prize item not found' }, { status: 500 });
     }
 
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
@@ -152,7 +146,7 @@ export async function POST(request: Request) {
     const { error: rpcError } = await supabase.rpc('open_chest_secure', {
       p_user_id: dbUser.id,
       p_chest_id: chestId, // UUID
-      p_price: price,
+      p_price: price.toString(),
       p_item_id: itemUuid
     });
 
@@ -180,7 +174,7 @@ export async function POST(request: Request) {
     const randomOffset = Math.floor(Math.random() * 60) - 30;
 
     return NextResponse.json({
-      wonItemId,
+      wonItem: itemInfo as ItemRow,
       randomOffset
     });
   } catch (error: unknown) {
