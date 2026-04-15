@@ -16,10 +16,14 @@ import { postEvent } from '@telegram-apps/sdk';
 
 import ChestView from './ChestView';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
+import { useUserStore } from '@/store/useUserStore'; // 引入 Store
 
 export default function AppLayout() {
   const [activeTab, setActiveTab] = useState('ducks');
   const { user } = useTelegramAuth();
+  
+  // 从 Zustand 获取实时资产数据
+  const { balance, stars } = useUserStore();
 
   useEffect(() => {
     try {
@@ -70,12 +74,12 @@ export default function AppLayout() {
           </button>
         </div>
 
-        {/* 右侧：资源信息 */}
+        {/* 右侧：资源信息 - 已修正为实时数据 */}
         <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-          <span>4689</span>
+          <span>{balance.toLocaleString()}</span>
           <div className="flex items-center gap-1">
             <Leaf className="w-5 h-5 text-green-400 fill-green-400" />
-            <span>261</span>
+            <span>{stars.toLocaleString()}</span>
           </div>
           <Star className="w-5 h-5 text-purple-400 fill-purple-400 ml-1 drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]" />
         </div>

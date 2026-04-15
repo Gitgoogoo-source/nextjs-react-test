@@ -1,82 +1,77 @@
-"use server";
+'use server';
 
-import { createAdminClient } from "@/lib/supabase/admin";
-import { validateTelegramWebAppData } from "@/lib/telegram";
+import { createAdminClient } from '@/lib/supabase/admin';
+import { validateTelegramWebAppData } from '@/lib/telegram';
+import { z } from 'zod';
+
+// 校验资产变更参数
+const assetChangeSchema = z.object({
+  amount: z.number(),
+  type: z.enum(['balance', 'stars']),
+  reason: z.string()
+});
 
 /**
- * SECURITY: 同步用户资产 (Coins/Balance & Stars)
- * 1. 验证 Telegram initData
- * 2. 如果用户不存在，则创建新用户 (默认赠送 1000 balance)
- * 3. 返回最新的资产信息
+ * 同步用户资产 (登录时调用)
+ * SECURITY: 验证 Telegram initData 确保身份真实性
  */
 export async function syncUserAssets(initData: string) {
   const { isValid, user } = validateTelegramWebAppData(initData);
-
   if (!isValid || !user) {
-    throw new Error("Invalid Telegram identity");
+    return { success: false, error: '身份验证失败' };
   }
 
   const supabase = createAdminClient();
-
-  // 尝试获取用户，如果不存在则创建
+  
+  // 查询最新数据，确保 telegram_id 是字符串匹配
   const { data, error } = await supabase
-    .from("users")
-    .upsert(
-      {
-        telegram_id: user.id,
-        username: user.username,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        avatar_url: user.photo_url,
-        last_login_at: new Date().toISOString(),
-      },
-      { onConflict: "telegram_id" }
-    )
-    .select("id, balance, stars")
+    .from('users')
+    .select('balance, stars')
+    .eq('telegram_id', user.id.toString())
     .single();
 
   if (error) {
-    console.error("Error syncing user assets:", error);
-    throw new Error("Failed to sync assets");
+    console.error(`[Security] 获取用户 ${user.id} 资产失败:`, error);
+    return { success: false, error: '数据库同步失败' };
   }
 
-  return { success: true, data };
+  return { 
+    success: true, 
+    data: {
+      balance: Number(data.balance || 0),
+      stars: Number(data.stars || 0)
+    }
+  };
 }
 
 /**
- * SECURITY: 执行资产变动 (事务性)
- * 1. 验证 Telegram initData
- * 2. 调用数据库 RPC 执行原子性操作 (更新余额 + 插入流水)
+ * 执行资产变更 (消费或奖励)
+ * 使用 RPC 确保 users 表更新与 resource_transactions 插入的原子性
  */
-export async function processAssetChange(
-  initData: string,
-  params: { amount: number; type: "balance" | "stars"; reason: string }
-) {
+export async function processAssetChange(initData: string, params: any) {
   const { isValid, user } = validateTelegramWebAppData(initData);
-
   if (!isValid || !user) {
-    throw new Error("Invalid Telegram identity");
+    return { success: false, error: '身份验证失败' };
   }
 
+  const validated = assetChangeSchema.parse(params);
   const supabase = createAdminClient();
 
-  // 调用我们在 SQL 阶段创建的 execute_asset_transaction RPC
-  const { data, error } = await supabase.rpc("execute_asset_transaction", {
-    p_telegram_id: user.id,
-    p_resource_type: params.type,
-    p_amount: params.amount,
-    p_reason: params.reason,
+  // SECURITY: 调用服务端 RPC 函数，确保数据一致性
+  const { data, error } = await supabase.rpc('update_user_assets_v2', {
+    p_telegram_id: user.id.toString(),
+    p_resource_type: validated.type,
+    p_amount: validated.amount,
+    p_reason: validated.reason
   });
 
   if (error) {
-    console.error("Transaction error:", error);
-    throw new Error(error.message || "Transaction failed");
+    console.error('资产更新失败:', error);
+    return { success: false, error: error.message };
   }
 
-  // RPC 返回格式: { success: boolean, new_balance: number, message?: string }
-  if (!data.success) {
-    throw new Error(data.message || "Transaction logic failed");
-  }
-
-  return { success: true, newBalance: data.new_balance };
+  return {
+    success: true,
+    newBalance: data.new_balance
+  };
 }
