@@ -229,12 +229,29 @@ export default function ChestView() {
     lastTickIndex.current = -1;
     
     try {
+      const uuidv4 = () => {
+        // 兼容 Telegram WebView：优先使用 randomUUID，否则用 getRandomValues 生成 RFC4122 v4
+        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+        const c = crypto as unknown as Crypto | undefined;
+        if (!c || typeof c.getRandomValues !== 'function') {
+          throw new Error('浏览器不支持安全随机数生成');
+        }
+        const bytes = new Uint8Array(16);
+        c.getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+        bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+      };
+
+      const requestId = uuidv4();
+
       // SECURITY: 点击后立刻向服务端提交开箱申请（前端不做结算/不传结果）
       const response = await fetch('/api/chest/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // SECURITY: 只传递宝箱 UUID（cases.id），后端会从数据库读取价格与类型进行验证
-        body: JSON.stringify({ chestId: currentChest.case_id, initData })
+        body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData })
       });
       
       if (!response.ok) {

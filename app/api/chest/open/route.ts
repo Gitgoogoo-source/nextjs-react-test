@@ -32,13 +32,15 @@ function pickWeightedItem(rows: { item_id: string; weight: number }[]) {
 const openChestSchema = z.object({
   // 统一：前端只传 cases.id（UUID）
   chestId: z.string().uuid(),
+  // 幂等键：断网/超时/重试不重复开箱
+  requestId: z.string().uuid(),
   initData: z.string().min(1),
 });
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { chestId, initData } = openChestSchema.parse(body);
+    const { chestId, requestId, initData } = openChestSchema.parse(body);
     
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
@@ -129,25 +131,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Chest drop table invalid' }, { status: 500 });
     }
 
-    // 6. 拉取奖品展示信息（前端仅用于展示，不参与任何结算）
-    const { data: itemInfo, error: itemInfoError } = await supabase
-      .from('items')
-      .select('id, name, rarity, color, border, hex')
-      .eq('id', itemUuid)
-      .maybeSingle();
-
-    if (itemInfoError || !itemInfo) {
-      console.error('Error fetching item info:', itemInfoError);
-      return NextResponse.json({ error: 'Prize item not found' }, { status: 500 });
-    }
-
-    // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
-    // 这样可以避免并发请求导致的余额或宝箱数量超扣问题
-    const { error: rpcError } = await supabase.rpc('open_chest_secure', {
+    // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品) + 幂等 requestId
+    // SECURITY: RPC 在 DB 事务内完成所有变更，且 requestId 幂等避免重试导致重复开箱
+    const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
       p_user_id: dbUser.id,
       p_chest_id: chestId, // UUID
       p_price: price.toString(),
-      p_item_id: itemUuid
+      p_item_id: itemUuid,
+      p_request_id: requestId,
     });
 
     if (rpcError) {
@@ -170,29 +161,47 @@ export async function POST(request: Request) {
       throw rpcError;
     }
 
-    // 7. 再读一遍最新资产，保证前端 UI 立即刷新（不信任前端本地计算）
-    // SECURITY: 资产以数据库为准，避免被篡改的客户端状态污染 UI/逻辑
-    const { data: latestAssets, error: assetsError } = await supabase
-      .from('users')
-      .select('balance, stars')
-      .eq('id', dbUser.id)
+    const parsedRpc = rpcData as
+      | {
+          success?: boolean;
+          already_processed?: boolean;
+          item_id?: string;
+          assets?: { balance?: number; stars?: number };
+        }
+      | null;
+
+    const finalItemId = parsedRpc?.item_id || itemUuid;
+
+    // 若幂等命中，必须返回同一 item
+    if (parsedRpc?.already_processed && parsedRpc?.item_id && parsedRpc.item_id !== itemUuid) {
+      // 覆盖展示 item
+      // SECURITY: 以 DB 事件记录为准，避免重试时“换奖品”
+    }
+
+    // 从 DB 读取最终展示 item（幂等命中时使用 event 的 item_id）
+    const { data: finalItemInfo, error: finalItemInfoError } = await supabase
+      .from('items')
+      .select('id, name, rarity, color, border, hex')
+      .eq('id', finalItemId)
       .maybeSingle();
 
-    if (assetsError || !latestAssets) {
-      console.error('Error fetching latest assets:', assetsError);
-      return NextResponse.json({ error: 'Failed to fetch latest user assets' }, { status: 500 });
+    if (finalItemInfoError || !finalItemInfo) {
+      console.error('Error fetching final item info:', finalItemInfoError);
+      return NextResponse.json({ error: 'Prize item not found' }, { status: 500 });
     }
 
     // 生成随机偏移量 (-30 到 30)
     const randomOffset = Math.floor(Math.random() * 60) - 30;
 
     return NextResponse.json({
-      wonItem: itemInfo as ItemRow,
+      wonItem: finalItemInfo as ItemRow,
       randomOffset,
-      userAssets: {
-        balance: Number(latestAssets.balance || 0),
-        stars: Number(latestAssets.stars || 0),
-      },
+      userAssets: parsedRpc?.assets
+        ? {
+            balance: Number(parsedRpc.assets.balance || 0),
+            stars: Number(parsedRpc.assets.stars || 0),
+          }
+        : undefined,
     });
   } catch (error: unknown) {
     const err = error as { name?: string };
