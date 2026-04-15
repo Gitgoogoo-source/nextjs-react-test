@@ -16,6 +16,7 @@ import { postEvent } from '@telegram-apps/sdk';
 import Image from 'next/image';
 
 import ChestView from './ChestView';
+import CollectionView from './CollectionView';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore'; // 引入 Store
 
@@ -96,6 +97,8 @@ export default function AppLayout() {
       <div className="flex-1 relative overflow-y-auto">
         {activeTab === 'ducks' ? (
           <ChestView />
+        ) : activeTab === 'eggs' ? (
+          <CollectionView />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-gray-600 font-medium">
             {tabs.find(t => t.id === activeTab)?.label} 界面内容区域

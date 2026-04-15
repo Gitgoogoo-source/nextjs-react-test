@@ -5,6 +5,7 @@ import { useUserStore } from '@/store/useUserStore';   // 使用 Zustand Store
 import { retrieveLaunchParams } from '@telegram-apps/sdk';
 import { TelegramUser } from '@/lib/telegram';
 import { useChestStore } from '@/store/useChestStore';
+import { useCollectionStore } from '@/store/useCollectionStore';
 
 export function useTelegramAuth() {
   const { isSyncing: storeSyncing, sync: syncStore, error: storeError } = useUserStore();
@@ -103,6 +104,10 @@ export function useTelegramAuth() {
         // 登录成功后，只执行一次“从后端获取用户宝箱数据”
         // SECURITY: 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
         await useChestStore.getState().loadOnce(initData);
+
+        // 登录成功后，只执行一次“从后端获取用户藏品数据”
+        // SECURITY: 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
+        await useCollectionStore.getState().loadOnce(initData);
         
       } catch (err: unknown) {
         console.error('Initialization error:', err);

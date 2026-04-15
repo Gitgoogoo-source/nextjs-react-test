@@ -7,6 +7,7 @@ import confetti from 'canvas-confetti';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
 import { useChestStore, type ChestListItem } from '@/store/useChestStore';
+import { useCollectionStore } from '@/store/useCollectionStore';
 
 // SECURITY: 前端不再硬编码价格，价格从数据库通过 API 获取
 // 此配置仅包含静态 UI 属性（颜色、图标等）
@@ -272,6 +273,9 @@ export default function ChestView() {
       // 静默同步最新资产/宝箱数量：在开箱动画期间后台完成，避免回主界面出现“同步数据中/加载宝箱中”
       // SECURITY: 仍然只通过 initData 让服务端验签后返回可信数据
       void useChestStore.getState().refreshSilent(initData);
+      // 开箱成功后静默刷新藏品列表（只在此处与登录处刷新，切换页面不重复请求）
+      // SECURITY: 只传 initData，服务端验签后读取 user_items/ items 返回可信数据
+      void useCollectionStore.getState().refreshSilent(initData);
       void useUserStore.getState().syncSilent(initData);
       
       // 生成 50 个物品，前 44 个随机展示
