@@ -33,7 +33,8 @@ const openChestSchema = z.object({
   // 统一：前端只传 cases.id（UUID）
   chestId: z.string().uuid(),
   // 幂等键：断网/超时/重试不重复开箱
-  requestId: z.string().uuid(),
+  // NOTE: 线上数据库可能仍是旧版 RPC（不支持 request_id），因此这里允许可选，服务端会做兼容降级
+  requestId: z.string().uuid().optional(),
   initData: z.string().min(1),
 });
 
@@ -71,9 +72,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Chest type not found in database' }, { status: 404 });
     }
 
-    // SECURITY: 使用数据库中的价格，而不是前端传来的价格
-    const price = BigInt(chestInfo.price || 0);
-    if (price <= BigInt(0)) {
+    // SECURITY: 使用数据库中的价格，而不是前端传来的价格（RPC 侧期望 integer）
+    const price = Number(chestInfo.price ?? 0);
+    if (!Number.isSafeInteger(price) || price <= 0) {
       return NextResponse.json({ error: 'Invalid chest price' }, { status: 400 });
     }
 
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
     }
 
     // 4. 检查余额是否足够
-    if (BigInt(dbUser.balance ?? 0) < price) {
+    if (Number(dbUser.balance ?? 0) < price) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
@@ -131,44 +132,75 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Chest drop table invalid' }, { status: 500 });
     }
 
-    // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品) + 幂等 requestId
-    // SECURITY: RPC 在 DB 事务内完成所有变更，且 requestId 幂等避免重试导致重复开箱
-    const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
-      p_user_id: dbUser.id,
-      p_chest_id: chestId, // UUID
-      p_price: price.toString(),
-      p_item_id: itemUuid,
-      p_request_id: requestId,
-    });
+    // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
+    // SECURITY: 优先使用带 request_id 的新签名（幂等/可审计）；若线上 DB 未迁移，自动降级到旧签名避免 500
+    const effectiveRequestId = requestId ?? crypto.randomUUID();
 
-    if (rpcError) {
-      console.error('RPC Error:', rpcError);
-      // SECURITY: PostgREST rpc 对同名函数重载不稳定，需保证数据库只保留一个签名
-      const msg = rpcError.message || '';
-      if (msg.includes('schema cache') || msg.includes('Could not find the function')) {
-        return NextResponse.json(
-          { error: 'Server RPC misconfigured (open_chest_secure)' },
-          { status: 500 }
-        );
-      }
-      // 根据错误信息返回对应的状态
-      if (rpcError.message.includes('Insufficient balance')) {
-        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
-      }
-      if (rpcError.message.includes('Not enough chests')) {
-        return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
-      }
-      throw rpcError;
-    }
-
-    const parsedRpc = rpcData as
+    type RpcResult =
       | {
           success?: boolean;
           already_processed?: boolean;
           item_id?: string;
           assets?: { balance?: number; stars?: number };
+          case_quantity_after?: number;
         }
       | null;
+
+    let rpcData: RpcResult = null;
+
+    const runRpcNewSignature = async () =>
+      supabase.rpc('open_chest_secure', {
+        p_user_id: dbUser.id,
+        p_chest_id: chestId,
+        p_price: price,
+        p_item_id: itemUuid,
+        p_request_id: effectiveRequestId,
+      });
+
+    const runRpcOldSignature = async () =>
+      supabase.rpc('open_chest_secure', {
+        p_user_id: dbUser.id,
+        p_chest_id: chestId,
+        p_price: price,
+        p_item_id: itemUuid,
+      });
+
+    const { data: rpcDataNew, error: rpcErrorNew } = await runRpcNewSignature();
+
+    if (rpcErrorNew) {
+      const msg = rpcErrorNew.message || '';
+      const code = (rpcErrorNew as unknown as { code?: string }).code || '';
+
+      // 线上 DB 仍是旧签名：PGRST202 + schema cache 提示
+      if (code === 'PGRST202' || msg.includes('Could not find the function')) {
+        const { data: rpcDataOld, error: rpcErrorOld } = await runRpcOldSignature();
+        if (rpcErrorOld) {
+          console.error('RPC Error (old signature):', rpcErrorOld);
+          const m2 = rpcErrorOld.message || '';
+          if (m2.includes('Insufficient balance')) {
+            return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+          }
+          if (m2.includes('Not enough chests')) {
+            return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+          }
+          return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+        }
+        rpcData = rpcDataOld as RpcResult;
+      } else {
+        console.error('RPC Error (new signature):', rpcErrorNew);
+        if (msg.includes('Insufficient balance')) {
+          return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+        }
+        if (msg.includes('Not enough chests')) {
+          return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+        }
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+      }
+    } else {
+      rpcData = rpcDataNew as RpcResult;
+    }
+
+    const parsedRpc = rpcData;
 
     const finalItemId = parsedRpc?.item_id || itemUuid;
 
@@ -193,15 +225,34 @@ export async function POST(request: Request) {
     // 生成随机偏移量 (-30 到 30)
     const randomOffset = Math.floor(Math.random() * 60) - 30;
 
+    // 若旧签名未返回 assets，则强制从 DB 读取最新资产（可信来源）
+    let userAssets:
+      | {
+          balance: number;
+          stars: number;
+        }
+      | undefined = parsedRpc?.assets
+      ? {
+          balance: Number(parsedRpc.assets.balance || 0),
+          stars: Number(parsedRpc.assets.stars || 0),
+        }
+      : undefined;
+
+    if (!userAssets) {
+      const { data: assetsRow, error: assetsErr } = await supabase
+        .from('users')
+        .select('balance, stars')
+        .eq('id', dbUser.id)
+        .maybeSingle();
+      if (!assetsErr && assetsRow) {
+        userAssets = { balance: Number(assetsRow.balance || 0), stars: Number(assetsRow.stars || 0) };
+      }
+    }
+
     return NextResponse.json({
       wonItem: finalItemInfo as ItemRow,
       randomOffset,
-      userAssets: parsedRpc?.assets
-        ? {
-            balance: Number(parsedRpc.assets.balance || 0),
-            stars: Number(parsedRpc.assets.stars || 0),
-          }
-        : undefined,
+      userAssets,
     });
   } catch (error: unknown) {
     const err = error as { name?: string };
