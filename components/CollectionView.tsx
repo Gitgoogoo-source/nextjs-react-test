@@ -65,10 +65,9 @@ export default function CollectionView() {
     <div className="absolute inset-0 flex flex-col px-4 py-6 overflow-hidden">
       <div className="shrink-0 mb-4">
         <h2 className="text-2xl font-bold text-white mb-1">我的藏品</h2>
-        <p className="text-gray-400 text-sm">只在登录与开箱成功后同步一次</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-24">
+      <div className="flex-1 overflow-y-auto pb-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <div className="grid grid-cols-2 gap-3">
           {items
             .slice()
