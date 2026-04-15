@@ -10,6 +10,7 @@ export function useTelegramAuth() {
   const { isSyncing: storeSyncing, sync: syncStore, error: storeError } = useUserStore();
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<TelegramUser | null>(null);
 
   useEffect(() => {
     async function init() {
@@ -17,12 +18,20 @@ export function useTelegramAuth() {
         if (typeof window === 'undefined') return;
 
         let initData = '';
+        let parsedUser: TelegramUser | null = null;
 
         // 尝试获取 Telegram initData
         try {
           const launchParams = retrieveLaunchParams();
-          if (launchParams?.initDataRaw) {
-            initData = launchParams.initDataRaw;
+          // SDK 的类型可能把 initDataRaw 标成 {}，这里做严格处理以通过 TS build
+          const anyLp = launchParams as any;
+          const raw = anyLp?.initDataRaw;
+          if (typeof raw === 'string') initData = raw;
+          else if (raw != null) initData = String(raw);
+          // UI 用用户信息（不用于鉴权）
+          // SECURITY: 前端拿到的 user 仅用于展示；所有敏感操作仍需服务端校验 initData 防止伪造
+          if (anyLp?.initData?.user) {
+            parsedUser = anyLp.initData.user as TelegramUser;
           }
         } catch (e) {
           const win = window as any;
@@ -41,6 +50,21 @@ export function useTelegramAuth() {
           return;
         }
 
+        // 从 initData 中解析 user（用于 UI 展示）
+        // SECURITY: 解析出来的 user 只做 UI，不作为身份凭据；身份以服务端 validateTelegramWebAppData 为准
+        if (!parsedUser) {
+          try {
+            const params = new URLSearchParams(initData);
+            const userStr = params.get('user');
+            if (userStr) {
+              parsedUser = JSON.parse(userStr) as TelegramUser;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+        setUser(parsedUser);
+
         // 调用 Zustand Store 的 sync 方法，它内部会调用 syncUserAssets 并更新状态
         await syncStore(initData);
         
@@ -56,6 +80,7 @@ export function useTelegramAuth() {
   }, [syncStore]);
 
   return { 
+    user,
     isSyncing: isInitializing || storeSyncing, 
     error: error || storeError 
   };
