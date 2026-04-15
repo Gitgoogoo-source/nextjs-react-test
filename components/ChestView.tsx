@@ -6,44 +6,31 @@ import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 
-const CHEST_TYPES = [
-  {
-    id: 'normal',
-    name: '普通宝箱',
-    color: 'from-blue-400 to-blue-600',
-    shadow: 'shadow-blue-500/50',
-    icon: Package,
-    price: 100,
-    description: '包含基础物品和普通鸭子',
-  },
-  {
-    id: 'rare',
-    name: '稀有宝箱',
-    color: 'from-purple-400 to-purple-600',
-    shadow: 'shadow-purple-500/50',
-    icon: Sparkles,
-    price: 500,
-    description: '高概率获得稀有物品和特殊鸭子',
-  },
-  {
-    id: 'exclusive',
-    name: '绝版宝箱',
-    color: 'from-red-400 to-orange-500',
-    shadow: 'shadow-red-500/50',
-    icon: Crown,
-    price: 2000,
-    description: '必定获得极其珍贵的绝版物品',
-  },
-  {
-    id: 'legend',
-    name: '传说宝箱',
-    color: 'from-yellow-400 to-yellow-600',
-    shadow: 'shadow-yellow-500/50',
-    icon: Crown,
-    price: 5000,
-    description: '必定获得传说级物品，万中无一',
-  }
-];
+// SECURITY: 前端不再硬编码价格，价格从数据库通过 API 获取
+// 此配置仅包含静态 UI 属性（颜色、图标等）
+const CHEST_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  normal: Package,
+  rare: Sparkles,
+  exclusive: Crown,
+  legend: Crown,
+};
+
+// API 返回的宝箱类型定义
+interface ChestData {
+  case_id: string;
+  quantity: number;
+  price: number;
+  name: string;
+  color: string;
+  shadow: string;
+  description: string;
+}
+
+// 用户宝箱实例类型（包含前端渲染需要的完整信息）
+interface UserChestInstance extends ChestData {
+  uniqueId: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
 
 // CSGO 风格的稀有度颜色，修改为玻璃拟态 (Glassmorphism) 风格
 const MOCK_PRIZES = [
@@ -143,8 +130,9 @@ export default function ChestView() {
   const { isSyncing, error: authError, user: tgUser } = useTelegramAuth();
   
   // 用户的宝箱列表
-  const [userChests, setUserChests] = useState<typeof CHEST_TYPES>([]);
+  const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
   const [isLoadingChests, setIsLoadingChests] = useState(true);
+  const [chestLoadError, setChestLoadError] = useState<string | null>(null);
 
   // 轮盘状态
   const [rouletteItems, setRouletteItems] = useState<typeof MOCK_PRIZES>([]);
@@ -159,7 +147,7 @@ export default function ChestView() {
   const x = useMotionValue(0);
   const lastTickIndex = useRef(-1);
 
-  // 获取用户宝箱数据
+  // 获取用户宝箱数据（从后端 API 获取价格和详情）
   useEffect(() => {
     async function fetchChests() {
       if (isSyncing) return;
@@ -169,25 +157,35 @@ export default function ChestView() {
       }
 
       try {
+        setChestLoadError(null);
         const response = await fetch(`/api/chest/list?userId=${tgUser.id}`);
-        if (!response.ok) throw new Error('Failed to fetch chests');
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to fetch chests');
+        }
         
         const { chests } = await response.json();
         
         // 根据返回的数据生成宝箱列表
-        const generatedChests: typeof CHEST_TYPES = [];
+        // SECURITY: 价格和其他数据都来自数据库（后端）
+        const generatedChests: UserChestInstance[] = [];
         
         if (chests && chests.length > 0) {
-          chests.forEach((chestData: { case_id: string, quantity: number }) => {
-            const baseChest = CHEST_TYPES.find(c => c.id === chestData.case_id);
-            if (baseChest && chestData.quantity > 0) {
+          chests.forEach((chestData: ChestData) => {
+            if (chestData.quantity > 0) {
               // 根据数量生成对应个数的宝箱对象
               for (let i = 0; i < chestData.quantity; i++) {
                 generatedChests.push({
-                  ...baseChest,
-                  // 为了在列表中区分不同的宝箱实例，添加一个唯一的 key
-                  uniqueId: `${baseChest.id}-${i}`
-                } as any);
+                  case_id: chestData.case_id,
+                  quantity: 1, // 单个实例
+                  price: chestData.price, // SECURITY: 来自数据库的价格
+                  name: chestData.name,
+                  color: chestData.color,
+                  shadow: chestData.shadow,
+                  description: chestData.description,
+                  uniqueId: `${chestData.case_id}-${i}`,
+                  icon: CHEST_ICON_MAP[chestData.case_id] || Package,
+                });
               }
             }
           });
@@ -196,6 +194,7 @@ export default function ChestView() {
         setUserChests(generatedChests);
       } catch (error) {
         console.error('Error fetching chests:', error);
+        setChestLoadError('加载宝箱失败，请刷新重试');
       } finally {
         setIsLoadingChests(false);
       }
@@ -230,6 +229,7 @@ export default function ChestView() {
     setCurrentIndex((prev) => (prev - 1 + userChests.length) % userChests.length);
   };
 
+  // SECURITY: 当前选中的宝箱，价格来自后端 API
   const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
 
   const startOpen = async () => {
@@ -245,7 +245,8 @@ export default function ChestView() {
       const response = await fetch('/api/chest/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chestId: currentChest.id, userId: tgUser?.id })
+        // SECURITY: 只传递宝箱类型ID，后端会从数据库读取价格进行验证
+        body: JSON.stringify({ chestId: currentChest.case_id, userId: tgUser?.id })
       });
       
       if (!response.ok) {
@@ -349,21 +350,28 @@ export default function ChestView() {
     x.set(0);
     lastTickIndex.current = -1;
     
-    // 重新获取宝箱列表以更新数量
+    // 重新获取宝箱列表以更新数量和价格
+    // SECURITY: 确保重新从服务器获取最新的价格
     if (tgUser?.id) {
       fetch(`/api/chest/list?userId=${tgUser.id}`)
         .then(res => res.json())
         .then(({ chests }) => {
-          const generatedChests: typeof CHEST_TYPES = [];
+          const generatedChests: UserChestInstance[] = [];
           if (chests && chests.length > 0) {
-            chests.forEach((chestData: { case_id: string, quantity: number }) => {
-              const baseChest = CHEST_TYPES.find(c => c.id === chestData.case_id);
-              if (baseChest && chestData.quantity > 0) {
+            chests.forEach((chestData: ChestData) => {
+              if (chestData.quantity > 0) {
                 for (let i = 0; i < chestData.quantity; i++) {
                   generatedChests.push({
-                    ...baseChest,
-                    uniqueId: `${baseChest.id}-${i}`
-                  } as any);
+                    case_id: chestData.case_id,
+                    quantity: 1,
+                    price: chestData.price, // SECURITY: 来自数据库的最新价格
+                    name: chestData.name,
+                    color: chestData.color,
+                    shadow: chestData.shadow,
+                    description: chestData.description,
+                    uniqueId: `${chestData.case_id}-${i}`,
+                    icon: CHEST_ICON_MAP[chestData.case_id] || Package,
+                  });
                 }
               }
             });
@@ -625,7 +633,7 @@ export default function ChestView() {
         <div className="relative h-11 w-full flex items-center justify-center">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
-              key={currentChest?.id}
+              key={currentChest?.case_id}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1, transition: { duration: 0.18 } }}
               exit={{ opacity: 0, transition: { duration: 0.12 } }}

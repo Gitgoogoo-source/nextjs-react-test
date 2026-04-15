@@ -33,12 +33,8 @@ const DROP_RATES = {
   ]
 };
 
-const CHEST_PRICES: Record<string, number> = {
-  normal: 100,
-  rare: 500,
-  exclusive: 2000,
-  legend: 5000,
-};
+// SECURITY: 价格不再硬编码，而是从数据库 cases 表读取
+// 这样可以确保前后端价格一致，防止客户端篡改价格
 
 // 映射前端的 mock ID 到数据库的 UUID
 const ITEM_ID_MAP: Record<number, string> = {
@@ -53,8 +49,14 @@ export async function POST(request: Request) {
   try {
     const { chestId, userId: telegramUserId } = await request.json();
     
-    if (!telegramUserId || !chestId || !DROP_RATES[chestId as keyof typeof DROP_RATES]) {
-      return NextResponse.json({ error: 'Invalid request data' }, { status: 400 });
+    // SECURITY: 严格验证输入参数
+    if (!telegramUserId || !chestId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+    
+    // SECURITY: 验证宝箱类型存在且合法
+    if (!DROP_RATES[chestId as keyof typeof DROP_RATES]) {
+      return NextResponse.json({ error: 'Invalid chest type' }, { status: 400 });
     }
 
     let supabase;
@@ -68,7 +70,25 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. 获取用户信息
+    // 1. 从数据库获取宝箱的实时价格（SECURITY: 防止客户端篡改价格）
+    const { data: chestInfo, error: chestInfoError } = await supabase
+      .from('cases')
+      .select('id, price')
+      .eq('id', chestId)
+      .maybeSingle();
+
+    if (chestInfoError || !chestInfo) {
+      console.error('Error fetching chest price:', chestInfoError);
+      return NextResponse.json({ error: 'Chest type not found in database' }, { status: 404 });
+    }
+
+    // SECURITY: 使用数据库中的价格，而不是前端传来的价格
+    const price = chestInfo.price || 0;
+    if (price <= 0) {
+      return NextResponse.json({ error: 'Invalid chest price' }, { status: 400 });
+    }
+
+    // 2. 获取用户信息
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, balance')
@@ -79,7 +99,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // 2. 检查用户是否拥有该宝箱
+    // 3. 检查用户是否拥有该宝箱
     const { data: userCase, error: caseError } = await supabase
       .from('user_cases')
       .select('id, quantity')
@@ -91,8 +111,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
     }
 
-    // 3. 检查余额是否足够
-    const price = CHEST_PRICES[chestId as keyof typeof CHEST_PRICES] || 0;
+    // 4. 检查余额是否足够
     if (user.balance < price) {
       return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
