@@ -12,11 +12,13 @@ import {
   Star,
   Leaf
 } from 'lucide-react';
-
+import { motion, AnimatePresence } from 'framer-motion';
+import { useUserStore } from '@/store/useUserStore';
 import ChestView from './ChestView';
 
 export default function MainLayout() {
   const [activeTab, setActiveTab] = useState('ducks');
+  const { balance, stars } = useUserStore();
 
   const tabs = [
     { id: 'market', label: '市场', icon: LineChart },
@@ -48,13 +50,32 @@ export default function MainLayout() {
           </div>
         </div>
 
-        {/* 右侧：资源信息 */}
+        {/* 右侧：资源信息 (带动画) */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 font-bold text-xl">
-            <span>4689</span>
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={balance}
+                initial={{ y: 5, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                className="tabular-nums"
+              >
+                {balance.toLocaleString()}
+              </motion.span>
+            </AnimatePresence>
             <Leaf className="w-5 h-5 text-green-400 fill-green-400" />
-            <span>261</span>
-            <Star className="w-5 h-5 text-purple-400 fill-purple-400 ml-1" />
+            
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={stars}
+                initial={{ y: 5, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                className="tabular-nums ml-1"
+              >
+                {stars.toLocaleString()}
+              </motion.span>
+            </AnimatePresence>
+            <Star className="w-5 h-5 text-blue-400 fill-blue-400" />
           </div>
         </div>
       </div>
