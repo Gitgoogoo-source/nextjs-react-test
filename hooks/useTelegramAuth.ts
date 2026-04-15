@@ -17,6 +17,10 @@ export function useTelegramAuth() {
       try {
         if (typeof window === 'undefined') return;
 
+        // 避免在多个组件里重复触发“全量同步”导致循环 loading：
+        // Provider 首次同步成功后，store 里已有 initData，其它组件再 mount 时应只读取状态，不要再 sync 一遍。
+        const existingInitData = useUserStore.getState().initData;
+
         let initData = '';
         let parsedUser: TelegramUser | null = null;
 
@@ -44,6 +48,22 @@ export function useTelegramAuth() {
           if (typeof win?.Telegram?.WebApp?.initData === 'string' && win.Telegram.WebApp.initData.length > 0) {
             initData = win.Telegram.WebApp.initData;
           }
+        }
+
+        // 如果 store 已经有 initData（通常来自 TelegramAuthProvider 的首次同步），就不要再次触发 syncStore
+        if (existingInitData) {
+          // 仍然尝试解析 user 供 UI 展示（不作为鉴权凭据）
+          if (!parsedUser) {
+            try {
+              const params = new URLSearchParams(existingInitData);
+              const userStr = params.get('user');
+              if (userStr) parsedUser = JSON.parse(userStr) as TelegramUser;
+            } catch {
+              // ignore
+            }
+          }
+          setUser(parsedUser);
+          return;
         }
 
         if (!initData) {

@@ -28,7 +28,13 @@ export const useUserStore = create<UserState>((set, get) => ({
   sync: async (initData) => {
     set({ isSyncing: true, error: null, initData });
     try {
-      const response = await syncUserAssets(initData);
+      // 防止网络/后端卡死导致无限 loading
+      const response = await Promise.race([
+        syncUserAssets(initData),
+        new Promise<{ success: false; error: string }>((resolve) =>
+          setTimeout(() => resolve({ success: false, error: '同步超时，请重试' }), 12_000)
+        ),
+      ]);
       if (response.success && response.data) {
         set({
           balance: Number(response.data.balance),
