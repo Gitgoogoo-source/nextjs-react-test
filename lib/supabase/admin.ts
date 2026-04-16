@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import 'server-only';
+import type { Database } from '@/types/supabase';
 
 export function createAdminClient() {
   // 只允许在服务端使用 service role（绕过 RLS / 系统级操作）
@@ -14,7 +15,7 @@ export function createAdminClient() {
     );
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

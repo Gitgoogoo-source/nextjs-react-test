@@ -19,6 +19,7 @@ import Image from 'next/image';
 import ChestView from './ChestView';
 import CollectionView from './CollectionView';
 import ShopView from './ShopView';
+import FriendsView from './FriendsView';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore'; // 引入 Store
 
@@ -104,6 +105,8 @@ export default function AppLayout() {
           <ShopView />
         ) : activeTab === 'eggs' ? (
           <CollectionView />
+        ) : activeTab === 'friends' ? (
+          <FriendsView />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-gray-600 font-medium">
             {tabs.find(t => t.id === activeTab)?.label} 界面内容区域
