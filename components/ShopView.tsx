@@ -37,6 +37,7 @@ export default function ShopView() {
   const [error, setError] = useState<string | null>(null);
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [purchaseRequestIds, setPurchaseRequestIds] = useState<Record<string, string>>({});
 
   const canFetch = Boolean(initData) && !isSyncing;
 
@@ -80,7 +81,8 @@ export default function ShopView() {
       setPurchasingId(productId);
       setError(null);
       try {
-        const requestId = crypto.randomUUID();
+        const requestId = purchaseRequestIds[productId] ?? crypto.randomUUID();
+        setPurchaseRequestIds((prev) => (prev[productId] ? prev : { ...prev, [productId]: requestId }));
         const res = await fetch('/api/shop/purchase', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -100,9 +102,15 @@ export default function ShopView() {
         setError(message);
       } finally {
         setPurchasingId(null);
+        setPurchaseRequestIds((prev) => {
+          if (!prev[productId]) return prev;
+          const next = { ...prev };
+          delete next[productId];
+          return next;
+        });
       }
     },
-    [initData, syncSilent]
+    [initData, purchaseRequestIds, syncSilent]
   );
 
   if (isLoading || isSyncing) {
