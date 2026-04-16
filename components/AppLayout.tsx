@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, 
+  ShoppingBag,
   Archive, 
   Package, 
   User, 
@@ -17,6 +18,7 @@ import Image from 'next/image';
 
 import ChestView from './ChestView';
 import CollectionView from './CollectionView';
+import ShopView from './ShopView';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore'; // 引入 Store
 
@@ -41,6 +43,7 @@ export default function AppLayout() {
 
   const tabs = [
     { id: 'market', label: '市场', icon: TrendingUp },
+    { id: 'shop', label: '商城', icon: ShoppingBag },
     { id: 'eggs', label: '藏品', icon: Archive, badge: 207 },
     { id: 'ducks', label: '宝箱', icon: Package },
     { id: 'friends', label: '好友', icon: User },
@@ -97,6 +100,8 @@ export default function AppLayout() {
       <div className="flex-1 relative overflow-y-auto">
         {activeTab === 'ducks' ? (
           <ChestView />
+        ) : activeTab === 'shop' ? (
+          <ShopView />
         ) : activeTab === 'eggs' ? (
           <CollectionView />
         ) : (
