@@ -9,10 +9,33 @@ import { useShopStore } from '@/store/useShopStore';
 import { useChestStore } from '@/store/useChestStore';
 import { useCollectionStore } from '@/store/useCollectionStore';
 
+function safeUUID() {
+  // Telegram WebView / 老版本 iOS 可能没有 crypto.randomUUID
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+}
+
 function currencyLabel(currency: string) {
   if (currency === 'balance') return '叶子';
   if (currency === 'stars') return '星星';
   return currency;
+}
+
+function hapticImpact(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
+  } catch {
+    // 忽略：非 Telegram 环境或不支持触感
+  }
+}
+
+function hapticNotify(type: 'success' | 'error' | 'warning') {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type);
+  } catch {
+    // 忽略：非 Telegram 环境或不支持触感
+  }
 }
 
 export default function ShopView() {
@@ -39,11 +62,16 @@ export default function ShopView() {
 
   const purchase = useCallback(
     async (productId: string) => {
-      if (!initData) return;
+      if (!initData) {
+        setActionError('未获取到登录信息，请在 Telegram 内重新打开小游戏');
+        hapticNotify('error');
+        return;
+      }
+      hapticImpact('light');
       setPurchasingId(productId);
       setActionError(null);
       try {
-        const requestId = purchaseRequestIds[productId] ?? crypto.randomUUID();
+        const requestId = purchaseRequestIds[productId] ?? safeUUID();
         setPurchaseRequestIds((prev) => (prev[productId] ? prev : { ...prev, [productId]: requestId }));
         const res = await fetch('/api/shop/purchase', {
           method: 'POST',
@@ -51,10 +79,21 @@ export default function ShopView() {
           // SECURITY: 只提交“动作”(购买某商品、数量、幂等 requestId) + initData；扣款/发货由服务端+DB 原子保证
           body: JSON.stringify({ productId, quantity: 1, requestId, initData }),
         });
-        const json = (await res.json()) as { success?: boolean; error?: string };
+
+        const raw = await res.text();
+        const json = (() => {
+          try {
+            return raw ? (JSON.parse(raw) as { success?: boolean; error?: string }) : {};
+          } catch {
+            return {};
+          }
+        })();
+
         if (!res.ok || !json?.success) {
-          throw new Error(json?.error || '购买失败');
+          throw new Error(json?.error || (raw ? raw.slice(0, 160) : '购买失败'));
         }
+
+        hapticNotify('success');
 
         // 购买成功后静默刷新资产，避免顶部资产显示滞后
         void syncSilent(initData);
@@ -68,6 +107,7 @@ export default function ShopView() {
         const message =
           typeof e === 'object' && e !== null && 'message' in e ? String((e as { message?: unknown }).message) : '购买失败';
         setActionError(message);
+        hapticNotify('error');
       } finally {
         setPurchasingId(null);
         setPurchaseRequestIds((prev) => {
@@ -126,7 +166,10 @@ export default function ShopView() {
           <h2 className="text-2xl font-bold text-white">商城</h2>
         </div>
         <button
-          onClick={() => initData && refresh(initData)}
+          onClick={() => {
+            hapticImpact('soft');
+            if (initData) refresh(initData);
+          }}
           className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-colors active:scale-95"
           aria-label="刷新商品"
         >

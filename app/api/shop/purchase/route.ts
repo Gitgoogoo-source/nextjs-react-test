@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return NextResponse.json({ success: false, error: '身份验证失败' }, { status: 401 });
     }
 
     const supabase = createAdminClient();
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (userError || !dbUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
     }
 
     const effectiveRequestId = requestId ?? crypto.randomUUID();
@@ -52,19 +52,19 @@ export async function POST(request: Request) {
     if (rpcError) {
       const msg = rpcError.message || '';
       if (msg.includes('Insufficient balance')) {
-        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Insufficient balance' }, { status: 400 });
       }
       if (msg.includes('Insufficient stars')) {
-        return NextResponse.json({ error: 'Insufficient stars' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Insufficient stars' }, { status: 400 });
       }
       if (msg.includes('Product not found')) {
-        return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+        return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
       }
       if (msg.includes('Invalid quantity')) {
-        return NextResponse.json({ error: 'Invalid quantity' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Invalid quantity' }, { status: 400 });
       }
       console.error('shop_purchase rpc error:', rpcError);
-      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+      return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -74,10 +74,10 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     const err = error as { name?: string };
     if (err?.name === 'ZodError') {
-      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Invalid request payload' }, { status: 400 });
     }
     console.error('Error in shop purchase route:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }
 
