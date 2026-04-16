@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 
+// SECURITY: 购买会改变资产/库存，必须禁用 Next.js 缓存，确保每次请求都走真实后端逻辑
+export const dynamic = 'force-dynamic';
+
 const purchaseSchema = z.object({
   productId: z.string().uuid(),
   quantity: z.number().int().min(1).max(100),

@@ -6,6 +6,8 @@ import { ShoppingBag, Sparkles, RefreshCcw, AlertTriangle, Loader2 } from 'lucid
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
 import { useShopStore } from '@/store/useShopStore';
+import { useChestStore } from '@/store/useChestStore';
+import { useCollectionStore } from '@/store/useCollectionStore';
 
 function currencyLabel(currency: string) {
   if (currency === 'balance') return '叶子';
@@ -58,6 +60,10 @@ export default function ShopView() {
         void syncSilent(initData);
         // 购买成功后静默刷新商品列表（避免有库存/上下架变化时 UI 不更新）
         void refreshSilent(initData);
+        // 购买成功后静默刷新宝箱/藏品：商品可能发放宝箱或物品
+        // SECURITY: 仍只传 initData，服务端验签后返回可信数据
+        void useChestStore.getState().refreshSilent(initData);
+        void useCollectionStore.getState().refreshSilent(initData);
       } catch (e: unknown) {
         const message =
           typeof e === 'object' && e !== null && 'message' in e ? String((e as { message?: unknown }).message) : '购买失败';

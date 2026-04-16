@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import 'server-only';
 
-export function createSupabaseServerClient() {
+export async function createSupabaseServerClient() {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -14,7 +14,7 @@ export function createSupabaseServerClient() {
     );
   }
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -24,7 +24,8 @@ export function createSupabaseServerClient() {
       setAll(cookiesToSet) {
         try {
           cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
+            // Next.js 16: cookies() 在部分上下文中是只读类型；写入仅在可写环境中生效
+            (cookieStore as unknown as { set?: (n: string, v: string, o: unknown) => void }).set?.(name, value, options);
           });
         } catch {
           // 在某些 RSC/Route 场景里 cookies 可能是只读的；此时忽略即可
