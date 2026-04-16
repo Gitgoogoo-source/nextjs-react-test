@@ -236,9 +236,10 @@ export default function ShopView() {
                   transition={{ duration: 0.2 }}
                   className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-4 overflow-hidden"
                 >
-                  <div className="absolute -top-12 -right-12 w-36 h-36 rounded-full blur-3xl opacity-20 bg-purple-500" />
+                  {/* 纯装饰层：必须不拦截点击 */}
+                  <div className="pointer-events-none absolute -top-12 -right-12 w-36 h-36 rounded-full blur-3xl opacity-20 bg-purple-500" />
 
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="relative z-10 flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-white font-bold text-lg leading-snug line-clamp-1">{title}</div>
                       {desc ? (
@@ -255,8 +256,9 @@ export default function ShopView() {
                     </div>
 
                     <button
+                      type="button"
                       disabled={isPurchasing}
-                      onClick={() => purchase(p.id)}
+                      onClick={() => void purchase(p.id)}
                       className={[
                         'shrink-0 px-4 py-2 rounded-xl font-bold text-white border transition-colors active:scale-95',
                         isPurchasing

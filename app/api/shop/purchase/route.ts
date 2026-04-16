@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ success: false, error: '身份验证失败' }, { status: 401 });
+      return NextResponse.json({ success: false, error: '身份验证失败，请在 Telegram 内重新打开小游戏' }, { status: 401 });
     }
 
     const supabase = createAdminClient();
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (userError || !dbUser) {
-      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
+      return NextResponse.json({ success: false, error: '用户不存在，请重新登录' }, { status: 404 });
     }
 
     const effectiveRequestId = requestId ?? crypto.randomUUID();
@@ -52,25 +52,60 @@ export async function POST(request: Request) {
     if (rpcError) {
       const msg = rpcError.message || '';
       if (msg.includes('Insufficient balance')) {
-        return NextResponse.json({ success: false, error: 'Insufficient balance' }, { status: 400 });
+        return NextResponse.json({ success: false, error: '叶子不足' }, { status: 400 });
       }
       if (msg.includes('Insufficient stars')) {
-        return NextResponse.json({ success: false, error: 'Insufficient stars' }, { status: 400 });
+        return NextResponse.json({ success: false, error: '星星不足' }, { status: 400 });
       }
       if (msg.includes('Product not found')) {
-        return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
+        return NextResponse.json({ success: false, error: '商品不存在或已下架' }, { status: 404 });
       }
       if (msg.includes('Invalid quantity')) {
-        return NextResponse.json({ success: false, error: 'Invalid quantity' }, { status: 400 });
+        return NextResponse.json({ success: false, error: '购买数量不合法' }, { status: 400 });
       }
       console.error('shop_purchase rpc error:', rpcError);
       return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      result: rpcData,
-    });
+    // SECURITY: rpcData 是 DB 函数返回的 json；需要把“幂等已处理/失败”等结果显式转换，避免前端静默成功
+    const payload = rpcData as unknown as {
+      success?: boolean;
+      already_processed?: boolean;
+      status?: 'pending' | 'succeeded' | 'failed';
+      assets?: { balance?: number; stars?: number } | null;
+    };
+
+    // 幂等冲突：如果已处理过，返回当前资产快照（200），避免弱网重试造成“无反应”
+    if (payload?.already_processed) {
+      const { data: assetsRow, error: assetsErr } = await supabase
+        .from('users')
+        .select('balance, stars')
+        .eq('id', dbUser.id)
+        .maybeSingle();
+      if (assetsErr) {
+        console.error('Failed to fetch assets after idempotent purchase:', assetsErr);
+      }
+
+      const assets = assetsRow
+        ? { balance: Number(assetsRow.balance ?? 0), stars: Number(assetsRow.stars ?? 0) }
+        : undefined;
+
+      if (payload?.success || payload?.status === 'succeeded') {
+        return NextResponse.json({ success: true, result: { ...payload, assets } }, { status: 200 });
+      }
+
+      // 已处理但失败：返回 400，让前端能明确提示
+      return NextResponse.json(
+        { success: false, error: '该订单已处理但未成功，请稍后重试', result: { ...payload, assets } },
+        { status: 400 }
+      );
+    }
+
+    if (!payload?.success) {
+      return NextResponse.json({ success: false, error: '购买失败，请稍后重试', result: payload }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, result: payload }, { status: 200 });
   } catch (error: unknown) {
     const err = error as { name?: string };
     if (err?.name === 'ZodError') {
