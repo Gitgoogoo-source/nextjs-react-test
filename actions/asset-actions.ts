@@ -23,11 +23,11 @@ export async function syncUserAssets(initData: string) {
 
   const supabase = createAdminClient();
   
-  // 查询最新数据，确保 telegram_id 是字符串匹配
+  // 查询最新数据（telegram_id 为 bigint，对应 TS number）
   const { data, error } = await supabase
     .from('users')
     .select('balance, stars')
-    .eq('telegram_id', user.id.toString())
+    .eq('telegram_id', user.id)
     .single();
 
   if (error) {
@@ -60,8 +60,8 @@ export async function processAssetChange(initData: string, params: AssetChangePa
   const supabase = createAdminClient();
 
   // SECURITY: 调用服务端 RPC 函数，确保数据一致性
-  const { data, error } = await supabase.rpc('update_user_assets_v2', {
-    p_telegram_id: user.id.toString(),
+  const { data, error } = await supabase.rpc('execute_asset_transaction', {
+    p_telegram_id: user.id,
     p_resource_type: validated.type,
     p_amount: validated.amount,
     p_reason: validated.reason
@@ -74,6 +74,6 @@ export async function processAssetChange(initData: string, params: AssetChangePa
 
   return {
     success: true,
-    newBalance: data.new_balance
+    newBalance: (data as unknown as { new_balance?: number | string } | null)?.new_balance
   };
 }

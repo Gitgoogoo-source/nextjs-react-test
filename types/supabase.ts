@@ -582,6 +582,41 @@ export type Database = {
           },
         ]
       }
+      user_prepared_messages: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          msg_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind: string
+          msg_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          msg_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'user_prepared_messages_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       users: {
         Row: {
           avatar_url: string | null
@@ -638,6 +673,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_invite_and_reward: {
+        Args: {
+          p_amount?: number
+          p_invite_code: string
+          p_invitee_telegram_id: number
+          p_inviter_telegram_id: number
+          p_reward_type?: string
+        }
+        Returns: Json
+      }
       execute_asset_transaction: {
         Args: {
           p_amount: number

@@ -43,7 +43,7 @@ export default function FriendsView() {
   const [toast, setToast] = useState<string | null>(null);
 
   const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
-  const preparedMsgId = process.env.NEXT_PUBLIC_TG_PREPARED_INVITE_MSG_ID;
+  const [preparedMsgId, setPreparedMsgId] = useState<string | null>(null);
 
   const inviteLink = useMemo(() => {
     if (!botUsername || !user?.id) return '';
@@ -99,16 +99,33 @@ export default function FriendsView() {
     }
 
     // 组合方式（优先 2 再回退 1）：
-    // 2) 若 Bot 已准备好 PreparedInlineMessage，则走 shareMessage（体验最好）
+    // 2) 服务端调用 Bot API savePreparedInlineMessage 生成 msg_id 后走 shareMessage（体验最好）
     // 1) 兜底走 startapp 深链接 + share/url 分享面板（归因最稳定）
     const w = window as unknown as {
       Telegram?: { WebApp?: { shareMessage?: (msgId: string) => void } };
     };
 
-    if (preparedMsgId && w.Telegram?.WebApp?.shareMessage) {
+    if (initData && w.Telegram?.WebApp?.shareMessage) {
       try {
-        w.Telegram.WebApp.shareMessage(preparedMsgId);
-        return;
+        // 若本地已有缓存，直接走 shareMessage
+        if (preparedMsgId) {
+          w.Telegram.WebApp.shareMessage(preparedMsgId);
+          return;
+        }
+
+        const res = await fetch('/api/friends/prepared-message', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ initData }),
+          cache: 'no-store',
+        });
+        const json = (await res.json()) as unknown;
+        if (res.ok && json && typeof json === 'object' && 'msgId' in json && typeof (json as { msgId?: unknown }).msgId === 'string') {
+          const msgId = (json as { msgId: string }).msgId;
+          setPreparedMsgId(msgId);
+          w.Telegram.WebApp.shareMessage(msgId);
+          return;
+        }
       } catch {
         // ignore and fallback
       }
@@ -117,7 +134,7 @@ export default function FriendsView() {
     const shareText = '来一起玩吧！点击链接进入并领取新手奖励：';
     const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent(shareText)}`;
     openTelegramShare(tgShareUrl);
-  }, [inviteLink, preparedMsgId, showToast]);
+  }, [initData, inviteLink, preparedMsgId, showToast]);
 
   const onCopy = useCallback(async () => {
     if (!inviteLink) {
@@ -199,12 +216,9 @@ export default function FriendsView() {
           </div>
         )}
 
-        {!preparedMsgId && (
-          <div className="mt-2 text-[11px] text-white/45">
-            可选：若你已在 Bot 侧准备 <span className="font-mono">PreparedInlineMessage</span>，可配置{' '}
-            <span className="font-mono">NEXT_PUBLIC_TG_PREPARED_INVITE_MSG_ID</span> 以启用原生 <span className="font-mono">shareMessage</span> 分享。
-          </div>
-        )}
+        <div className="mt-2 text-[11px] text-white/45">
+          分享面板优先走 Telegram 原生 <span className="font-mono">shareMessage</span>（服务端生成并缓存 msg_id），失败时自动回退到链接分享。
+        </div>
 
         {error && <div className="mt-3 text-xs text-red-400">加载失败：{error}</div>}
       </div>

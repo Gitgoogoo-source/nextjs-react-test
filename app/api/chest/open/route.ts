@@ -102,7 +102,7 @@ export async function POST(request: Request) {
     const { data: dbUser, error: userError } = await supabase
       .from('users')
       .select('id, balance')
-      .eq('telegram_id', tgUser.id.toString())
+      .eq('telegram_id', tgUser.id)
       .maybeSingle();
 
     if (userError || !dbUser) {
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
     }
 
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
-    // SECURITY: 优先使用带 request_id 的新签名（幂等/可审计）；若线上 DB 未迁移，自动降级到旧签名避免 500
+    // SECURITY: 统一使用带 request_id 的签名（幂等/可审计）
     const effectiveRequestId = requestId ?? crypto.randomUUID();
 
     type RpcResult =
@@ -146,61 +146,27 @@ export async function POST(request: Request) {
         }
       | null;
 
-    let rpcData: RpcResult = null;
+    const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
+      p_user_id: dbUser.id,
+      p_chest_id: chestId,
+      p_price: price,
+      p_item_id: itemUuid,
+      p_request_id: effectiveRequestId,
+    });
 
-    const runRpcNewSignature = async () =>
-      supabase.rpc('open_chest_secure', {
-        p_user_id: dbUser.id,
-        p_chest_id: chestId,
-        p_price: price,
-        p_item_id: itemUuid,
-        p_request_id: effectiveRequestId,
-      });
-
-    const runRpcOldSignature = async () =>
-      supabase.rpc('open_chest_secure', {
-        p_user_id: dbUser.id,
-        p_chest_id: chestId,
-        p_price: price,
-        p_item_id: itemUuid,
-      });
-
-    const { data: rpcDataNew, error: rpcErrorNew } = await runRpcNewSignature();
-
-    if (rpcErrorNew) {
-      const msg = rpcErrorNew.message || '';
-      const code = (rpcErrorNew as unknown as { code?: string }).code || '';
-
-      // 线上 DB 仍是旧签名：PGRST202 + schema cache 提示
-      if (code === 'PGRST202' || msg.includes('Could not find the function')) {
-        const { data: rpcDataOld, error: rpcErrorOld } = await runRpcOldSignature();
-        if (rpcErrorOld) {
-          console.error('RPC Error (old signature):', rpcErrorOld);
-          const m2 = rpcErrorOld.message || '';
-          if (m2.includes('Insufficient balance')) {
-            return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
-          }
-          if (m2.includes('Not enough chests')) {
-            return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
-          }
-          return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-        }
-        rpcData = rpcDataOld as RpcResult;
-      } else {
-        console.error('RPC Error (new signature):', rpcErrorNew);
-        if (msg.includes('Insufficient balance')) {
-          return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
-        }
-        if (msg.includes('Not enough chests')) {
-          return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
-        }
-        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (rpcError) {
+      console.error('RPC Error (open_chest_secure):', rpcError);
+      const msg = rpcError.message || '';
+      if (msg.includes('Insufficient balance')) {
+        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
       }
-    } else {
-      rpcData = rpcDataNew as RpcResult;
+      if (msg.includes('Not enough chests')) {
+        return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+      }
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 
-    const parsedRpc = rpcData;
+    const parsedRpc = rpcData as RpcResult;
 
     const finalItemId = parsedRpc?.item_id || itemUuid;
 

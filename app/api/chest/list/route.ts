@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
-      .eq('telegram_id', tgUser.id.toString())
+      .eq('telegram_id', tgUser.id)
       .maybeSingle();
 
     if (userError || !user) {
