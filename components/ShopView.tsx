@@ -5,22 +5,7 @@ import { motion } from 'framer-motion';
 import { ShoppingBag, Sparkles, RefreshCcw, AlertTriangle, Loader2 } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
-
-type ShopCurrency = 'balance' | 'stars';
-type ProductType = 'case' | 'item' | 'bundle' | 'unknown';
-
-interface ShopProduct {
-  id: string;
-  product_type: ProductType | string;
-  title: string;
-  description: string | null;
-  currency: ShopCurrency | string;
-  price: number;
-  case_id: string | null;
-  item_id: string | null;
-  cases?: { id: string; name: string; case_key: string; price: number; description: string | null } | null;
-  items?: { id: string; name: string; rarity: string; color: string | null; border: string | null; hex: string | null } | null;
-}
+import { useShopStore } from '@/store/useShopStore';
 
 function currencyLabel(currency: string) {
   if (currency === 'balance') return '叶子';
@@ -33,53 +18,28 @@ export default function ShopView() {
   const initData = useUserStore((s) => s.initData);
   const syncSilent = useUserStore((s) => s.syncSilent);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [products, setProducts] = useState<ShopProduct[]>([]);
+  const { products, isLoading, error, hasLoaded, loadOnce, refresh, refreshSilent } = useShopStore();
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
   const [purchaseRequestIds, setPurchaseRequestIds] = useState<Record<string, string>>({});
-
-  const canFetch = Boolean(initData) && !isSyncing;
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const visibleProducts = useMemo(() => {
     return (products ?? []).filter((p) => p && p.id);
   }, [products]);
 
-  const fetchProducts = useCallback(async () => {
-    if (!initData) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/shop/products/list', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        // SECURITY: 前端只传 initData；服务端会验签并从中提取可信 userId
-        body: JSON.stringify({ initData }),
-      });
-      const json = (await res.json()) as { success?: boolean; products?: ShopProduct[]; error?: string };
-      if (!res.ok || !json?.success) {
-        throw new Error(json?.error || '加载商城失败');
-      }
-      setProducts(Array.isArray(json.products) ? json.products : []);
-    } catch (e: unknown) {
-      const message =
-        typeof e === 'object' && e !== null && 'message' in e ? String((e as { message?: unknown }).message) : '加载失败';
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [initData]);
-
   useEffect(() => {
-    if (!canFetch) return;
-    void fetchProducts();
-  }, [canFetch, fetchProducts]);
+    if (isSyncing) return;
+    if (!initData) return;
+    if (hasLoaded) return;
+    // 登录成功后只加载一次；切换 Tab 重新 mount 也不会重复请求
+    void loadOnce(initData);
+  }, [isSyncing, initData, hasLoaded, loadOnce]);
 
   const purchase = useCallback(
     async (productId: string) => {
       if (!initData) return;
       setPurchasingId(productId);
-      setError(null);
+      setActionError(null);
       try {
         const requestId = purchaseRequestIds[productId] ?? crypto.randomUUID();
         setPurchaseRequestIds((prev) => (prev[productId] ? prev : { ...prev, [productId]: requestId }));
@@ -96,10 +56,12 @@ export default function ShopView() {
 
         // 购买成功后静默刷新资产，避免顶部资产显示滞后
         void syncSilent(initData);
+        // 购买成功后静默刷新商品列表（避免有库存/上下架变化时 UI 不更新）
+        void refreshSilent(initData);
       } catch (e: unknown) {
         const message =
           typeof e === 'object' && e !== null && 'message' in e ? String((e as { message?: unknown }).message) : '购买失败';
-        setError(message);
+        setActionError(message);
       } finally {
         setPurchasingId(null);
         setPurchaseRequestIds((prev) => {
@@ -110,7 +72,7 @@ export default function ShopView() {
         });
       }
     },
-    [initData, purchaseRequestIds, syncSilent]
+    [initData, purchaseRequestIds, syncSilent, refreshSilent]
   );
 
   if (isLoading || isSyncing) {
@@ -141,7 +103,7 @@ export default function ShopView() {
         <div className="text-white font-bold text-xl mb-1">加载失败</div>
         <div className="text-zinc-400 mb-5">{error}</div>
         <button
-          onClick={fetchProducts}
+          onClick={() => initData && refresh(initData)}
           className="px-6 py-3 rounded-xl font-bold text-white bg-white/10 hover:bg-white/15 border border-white/10 transition-colors active:scale-95"
         >
           重试
@@ -158,13 +120,19 @@ export default function ShopView() {
           <h2 className="text-2xl font-bold text-white">商城</h2>
         </div>
         <button
-          onClick={fetchProducts}
+          onClick={() => initData && refresh(initData)}
           className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-colors active:scale-95"
           aria-label="刷新商品"
         >
           <RefreshCcw className="w-4 h-4 text-gray-300" />
         </button>
       </div>
+
+      {actionError ? (
+        <div className="shrink-0 mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          {actionError}
+        </div>
+      ) : null}
 
       {visibleProducts.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
