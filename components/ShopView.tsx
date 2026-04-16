@@ -13,7 +13,19 @@ function safeUUID() {
   // Telegram WebView / 老版本 iOS 可能没有 crypto.randomUUID
   const c = globalThis.crypto as Crypto | undefined;
   if (c?.randomUUID) return c.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+  // 生成 RFC4122 v4 UUID（满足服务端 zod.uuid() 校验）
+  const bytes = new Uint8Array(16);
+  c?.getRandomValues?.(bytes);
+  // 若 getRandomValues 也不可用，再降级为 Math.random（仍保持 UUID 形状）
+  if (!c?.getRandomValues) {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  // version 4
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  // variant 10
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function currencyLabel(currency: string) {
@@ -42,6 +54,7 @@ export default function ShopView() {
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
   const syncSilent = useUserStore((s) => s.syncSilent);
+  const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
 
   const { products, isLoading, error, hasLoaded, loadOnce, refresh, refreshSilent } = useShopStore();
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
@@ -83,7 +96,13 @@ export default function ShopView() {
         const raw = await res.text();
         const json = (() => {
           try {
-            return raw ? (JSON.parse(raw) as { success?: boolean; error?: string }) : {};
+            return raw
+              ? (JSON.parse(raw) as {
+                  success?: boolean;
+                  error?: string;
+                  result?: { assets?: { balance?: number; stars?: number } };
+                })
+              : {};
           } catch {
             return {};
           }
@@ -94,6 +113,16 @@ export default function ShopView() {
         }
 
         hapticNotify('success');
+
+        // 购买成功后优先用接口回传的“可信资产快照”更新顶部资产（避免二次同步在弱网下延迟/失败）
+        // SECURITY: assets 由服务端在校验 initData + DB 原子事务后返回，前端不参与计算
+        const assets = json?.result?.assets;
+        if (assets && (typeof assets.balance !== 'undefined' || typeof assets.stars !== 'undefined')) {
+          setAssetsFromServer({
+            balance: Number(assets.balance ?? 0),
+            stars: Number(assets.stars ?? 0),
+          });
+        }
 
         // 购买成功后静默刷新资产，避免顶部资产显示滞后
         void syncSilent(initData);
@@ -118,7 +147,7 @@ export default function ShopView() {
         });
       }
     },
-    [initData, purchaseRequestIds, syncSilent, refreshSilent]
+    [initData, purchaseRequestIds, refreshSilent, setAssetsFromServer, syncSilent]
   );
 
   if (isLoading || isSyncing) {
