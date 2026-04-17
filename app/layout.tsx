@@ -35,7 +35,7 @@ export default function RootLayout({
           strategy="beforeInteractive"
         />
       </head>
-      <body className="min-h-full flex flex-col bg-black text-white">
+      <body className="min-h-full flex flex-col bg-background text-foreground">
         <TelegramAuthProvider>
           {children}
         </TelegramAuthProvider>

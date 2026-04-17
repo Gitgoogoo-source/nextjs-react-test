@@ -52,7 +52,7 @@ export default function AppLayout() {
   ];
 
   return (
-    <div className="flex flex-col h-screen w-full max-w-md mx-auto bg-[#100a18] text-white font-sans relative overflow-hidden">
+    <div className="flex flex-col h-screen w-full max-w-md mx-auto bg-background text-foreground font-sans relative overflow-hidden">
       {/* 顶部导航栏 */}
       <div className="flex items-center justify-between px-4 py-4 z-10">
         {/* 左侧：用户信息 */}
@@ -68,21 +68,21 @@ export default function AppLayout() {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <span className="text-sm font-bold text-white">
+              <span className="text-sm font-bold text-foreground">
                 {user?.first_name?.charAt(0) || 'K'}
               </span>
             )}
           </div>
           
           {/* 鸭群 */}
-          <div className="flex items-center gap-1.5 bg-white/5 rounded-full px-3 py-1.5 border border-white/10">
-            <Flame className="w-4 h-4 text-gray-400" />
-            <span className="text-sm font-medium text-gray-200">鸭群</span>
+          <div className="flex items-center gap-1.5 bg-foreground/5 rounded-full px-3 py-1.5 border border-foreground/10">
+            <Flame className="w-4 h-4 text-tg-hint" />
+            <span className="text-sm font-medium text-foreground">鸭群</span>
           </div>
           
           {/* 钱包 */}
-          <button className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center border border-white/10 transition-colors hover:bg-white/10">
-            <Wallet className="w-4 h-4 text-gray-300" />
+          <button className="w-9 h-9 rounded-full bg-foreground/5 flex items-center justify-center border border-foreground/10 transition-colors hover:bg-foreground/10">
+            <Wallet className="w-4 h-4 text-tg-hint" />
           </button>
         </div>
 
@@ -108,14 +108,14 @@ export default function AppLayout() {
         ) : activeTab === 'friends' ? (
           <FriendsView />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-600 font-medium">
+          <div className="absolute inset-0 flex items-center justify-center text-tg-hint font-medium">
             {tabs.find(t => t.id === activeTab)?.label} 界面内容区域
           </div>
         )}
       </div>
 
       {/* 底部导航栏 */}
-      <div className="bg-[#1a1125] border-t border-white/5 px-2 py-3 pb-safe">
+      <div className="bg-tg-secondary-bg border-t border-foreground/5 px-2 py-3 pb-safe">
         <div className="flex justify-around items-center">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -126,31 +126,31 @@ export default function AppLayout() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-2xl transition-all duration-200 ${
-                  isActive ? 'text-white' : 'text-gray-500 hover:text-gray-300'
+                  isActive ? 'text-foreground' : 'text-tg-hint hover:text-foreground/80'
                 }`}
               >
                 {/* 选中状态的背景高亮 */}
                 {isActive && (
-                  <div className="absolute inset-0 bg-white/5 rounded-xl" />
+                  <div className="absolute inset-0 bg-foreground/5 rounded-xl" />
                 )}
                 
                 <div className="relative mb-1">
                   <Icon 
                     className={`w-6 h-6 transition-colors ${
-                      isActive ? 'text-white' : 'text-gray-500'
+                      isActive ? 'text-foreground' : 'text-tg-hint'
                     }`} 
                   />
                   
                   {/* 徽章 */}
                   {tab.badge && (
-                    <div className="absolute -top-2 -right-3 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-[1.5px] border-[#1a1125] shadow-sm">
+                    <div className="absolute -top-2 -right-3 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-[1.5px] border-tg-secondary-bg shadow-sm">
                       {tab.badge > 99 ? '99+' : tab.badge}
                     </div>
                   )}
                 </div>
                 
                 <span className={`text-[10px] font-medium transition-colors ${
-                  isActive ? 'text-white' : 'text-gray-500'
+                  isActive ? 'text-foreground' : 'text-tg-hint'
                 }`}>
                   {tab.label}
                 </span>

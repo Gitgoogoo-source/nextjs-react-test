@@ -1,26 +1,38 @@
 @import "tailwindcss";
 
+/* Telegram Mini App：--tg-theme-* / --tg-safe-area-* 由客户端注入（规则 §7） */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: var(--tg-theme-bg-color, #100a18);
+  --foreground: var(--tg-theme-text-color, #ffffff);
+  --tg-hint: var(--tg-theme-hint-color, #9ca3af);
+  --tg-secondary-bg: var(--tg-theme-secondary-bg-color, rgba(255, 255, 255, 0.06));
+  --tg-button: var(--tg-theme-button-color, #3390ec);
+  --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-tg-hint: var(--tg-hint);
+  --color-tg-secondary-bg: var(--tg-secondary-bg);
+  --color-tg-button: var(--tg-button);
+  --color-tg-button-text: var(--tg-button-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  /* 刘海与 Telegram 标题栏安全区 */
+  padding-top: var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px));
+}
+
+/* 底部 Home 指示条 / Telegram 底部安全区（与页签栏配合使用） */
+@utility pb-safe {
+  padding-bottom: var(
+    --tg-safe-area-inset-bottom,
+    env(safe-area-inset-bottom, 0px)
+  );
 }

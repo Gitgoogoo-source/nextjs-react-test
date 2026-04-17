@@ -395,18 +395,18 @@ export default function ChestView() {
   if (isOpening) {
     return (
       // 移动端全屏适配
-      <div className="fixed inset-0 w-screen h-screen flex flex-col items-center justify-center bg-zinc-950 overflow-hidden z-50">
+      <div className="fixed inset-0 w-screen h-screen flex flex-col items-center justify-center bg-background overflow-hidden z-50">
         {/* 工业/科技风背景 */}
         <div className="absolute inset-0 opacity-20 pointer-events-none">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#4f4f4f2e_1px,transparent_1px),linear-gradient(to_bottom,#4f4f4f2e_1px,transparent_1px)] bg-[size:14px_24px]" />
-          <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-40 bg-zinc-900 shadow-[0_0_50px_rgba(0,0,0,0.8)] border-y border-zinc-800" />
+          <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-40 bg-tg-secondary-bg shadow-[0_0_50px_rgba(0,0,0,0.8)] border-y border-foreground/10" />
         </div>
 
         {/* 顶部返回按钮 */}
         {!isSpinning && !showResult && (
           <button 
             onClick={resetState}
-            className="absolute top-safe-offset-6 left-4 text-zinc-400 hover:text-white flex items-center gap-2 z-20 mt-4"
+            className="absolute left-4 text-tg-hint hover:text-foreground flex items-center gap-2 z-20 mt-4 top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)]"
           >
             <ArrowLeft className="w-5 h-5" />
             <span>返回</span>

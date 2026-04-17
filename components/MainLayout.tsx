@@ -29,9 +29,9 @@ export default function MainLayout() {
   ];
 
   return (
-    <div className="flex flex-col h-screen bg-[#1a1025] text-white font-sans overflow-hidden">
+    <div className="flex flex-col h-screen bg-background text-foreground font-sans overflow-hidden">
       {/* 顶部导航栏 */}
-      <div className="flex items-center justify-between px-4 py-3 bg-[#1a1025]/80 backdrop-blur-sm z-10">
+      <div className="flex items-center justify-between px-4 py-3 bg-background/80 backdrop-blur-sm z-10">
         {/* 左侧：用户信息 */}
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -40,13 +40,13 @@ export default function MainLayout() {
             </div>
           </div>
           
-          <div className="flex items-center gap-2 bg-black/40 rounded-full px-3 py-1.5 border border-white/5">
-            <Flame className="w-4 h-4 text-gray-400" />
-            <span className="text-sm font-medium">鸭群</span>
+          <div className="flex items-center gap-2 bg-foreground/5 rounded-full px-3 py-1.5 border border-foreground/10">
+            <Flame className="w-4 h-4 text-tg-hint" />
+            <span className="text-sm font-medium text-foreground">鸭群</span>
           </div>
           
-          <div className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center border border-white/5">
-            <Wallet className="w-4 h-4 text-gray-300" />
+          <div className="w-8 h-8 rounded-full bg-foreground/5 flex items-center justify-center border border-foreground/10">
+            <Wallet className="w-4 h-4 text-tg-hint" />
           </div>
         </div>
 
@@ -85,14 +85,14 @@ export default function MainLayout() {
         {activeTab === 'ducks' ? (
           <ChestView />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+          <div className="absolute inset-0 flex items-center justify-center text-tg-hint">
             {tabs.find(t => t.id === activeTab)?.label} 界面内容区域
           </div>
         )}
       </div>
 
       {/* 底部导航栏 */}
-      <div className="bg-[#1e132b] border-t border-white/5 px-2 py-2 pb-safe">
+      <div className="bg-tg-secondary-bg border-t border-foreground/5 px-2 py-2 pb-safe">
         <div className="flex justify-around items-center">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -103,26 +103,26 @@ export default function MainLayout() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-2xl transition-all duration-200 ${
-                  isActive ? 'text-white' : 'text-gray-500 hover:text-gray-300'
+                  isActive ? 'text-foreground' : 'text-tg-hint hover:text-foreground/80'
                 }`}
               >
                 {/* 选中状态的背景高亮 */}
                 {isActive && (
-                  <div className="absolute inset-0 bg-white/5 rounded-xl" />
+                  <div className="absolute inset-0 bg-foreground/5 rounded-xl" />
                 )}
                 
                 <div className="relative mb-1">
-                  <Icon className={`w-6 h-6 ${isActive ? 'text-white' : ''}`} />
+                  <Icon className={`w-6 h-6 ${isActive ? 'text-foreground' : 'text-tg-hint'}`} />
                   
                   {/* 徽章 */}
                   {tab.badge && (
-                    <div className="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[16px] text-center border border-[#1e132b]">
+                    <div className="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[16px] text-center border border-tg-secondary-bg">
                       {tab.badge > 99 ? '99+' : tab.badge}
                     </div>
                   )}
                 </div>
                 
-                <span className={`text-[10px] font-medium ${isActive ? 'text-white' : ''}`}>
+                <span className={`text-[10px] font-medium ${isActive ? 'text-foreground' : 'text-tg-hint'}`}>
                   {tab.label}
                 </span>
               </button>

@@ -11,7 +11,7 @@ export function TelegramAuthProvider({ children }: { children: React.ReactNode }
 
   if (isSyncing) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -30,14 +30,14 @@ export function TelegramAuthProvider({ children }: { children: React.ReactNode }
               className="absolute inset-2 rounded-full border-l-4 border-r-4 border-blue-500 opacity-75"
             />
             <div className="absolute inset-0 flex items-center justify-center">
-              <Loader2 className="w-8 h-8 text-white animate-spin" />
+              <Loader2 className="w-8 h-8 text-foreground animate-spin" />
             </div>
           </div>
           <motion.p
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.5 }}
-            className="text-lg font-semibold tracking-wider uppercase text-gray-300"
+            className="text-lg font-semibold tracking-wider uppercase text-tg-hint"
           >
             正在同步数据...
           </motion.p>
@@ -48,10 +48,10 @@ export function TelegramAuthProvider({ children }: { children: React.ReactNode }
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
         <div className="text-center space-y-4">
           <p className="text-red-500 font-bold text-xl">同步失败</p>
-          <p className="text-gray-400">{error}</p>
+          <p className="text-tg-hint">{error}</p>
         </div>
       </div>
     );
