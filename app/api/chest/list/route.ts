@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
+import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 import { z } from 'zod';
 
 interface UserCaseRow {
@@ -72,6 +73,18 @@ export async function POST(request: Request) {
         { error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY missing' },
         { status: 500 }
       );
+    }
+
+    // SECURITY: 限流（30 req/min 粒度）
+    const rateLimitResult = await checkRateLimit(supabase, {
+      scope: telegramScope(tgUser.id),
+      route: 'chest/list',
+      limit: 30,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return rateLimitExceededResponse(rateLimitResult);
     }
 
     // 1. 将 telegramUserId 转换为内部的 users.id (UUID)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
+import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
 const listProductsSchema = z.object({
   initData: z.string().min(1),
@@ -19,6 +20,18 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminClient();
+
+    // SECURITY: 限流（30 req/min 粒度）
+    const rateLimitResult = await checkRateLimit(supabase, {
+      scope: telegramScope(tgUser.id),
+      route: 'shop/products/list',
+      limit: 30,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return rateLimitExceededResponse(rateLimitResult);
+    }
 
     // SECURITY: 商品列表只来自 DB（shop_products），前端不允许硬编码商品/价格
     const { data, error } = await supabase

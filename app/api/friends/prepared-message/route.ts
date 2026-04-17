@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
+import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,13 +33,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
     }
 
+    const supabase = createAdminClient();
+
+    // SECURITY: 限流（此端点调用 Telegram Bot API，配额需保护）
+    // 5 req/min 粒度
+    const rateLimitResult = await checkRateLimit(supabase, {
+      scope: telegramScope(tgUser.id),
+      route: 'friends/prepared-message',
+      limit: 5,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return rateLimitExceededResponse(rateLimitResult);
+    }
+
     const botToken = getEnv('TELEGRAM_BOT_TOKEN');
     const botUsername = getEnv('NEXT_PUBLIC_TELEGRAM_BOT_USERNAME');
     if (!botToken || !botUsername) {
       return NextResponse.json({ error: 'Bot 未配置' }, { status: 500 });
     }
-
-    const supabase = createAdminClient();
 
     // 1) 找到当前用户（inviter）
     const { data: dbUser, error: userErr } = await supabase

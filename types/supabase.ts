@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_rate_limits: {
+        Row: {
+          count: number
+          route: string
+          scope: string
+          updated_at: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          route: string
+          scope: string
+          updated_at?: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          route?: string
+          scope?: string
+          updated_at?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       case_items: {
         Row: {
           case_id: string
@@ -682,6 +706,19 @@ export type Database = {
           p_reward_type?: string
         }
         Returns: Json
+      }
+      check_and_increment_rate_limit: {
+        Args: {
+          p_limit: number
+          p_route: string
+          p_scope: string
+          p_window_seconds: number
+        }
+        Returns: Json
+      }
+      cleanup_expired_rate_limits: {
+        Args: Record<string, never>
+        Returns: undefined
       }
       execute_asset_transaction: {
         Args: {

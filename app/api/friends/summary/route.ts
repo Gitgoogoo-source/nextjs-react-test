@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
+import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,18 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminClient();
+
+    // SECURITY: 限流（30 req/min 粒度）
+    const rateLimitResult = await checkRateLimit(supabase, {
+      scope: telegramScope(tgUser.id),
+      route: 'friends/summary',
+      limit: 30,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return rateLimitExceededResponse(rateLimitResult);
+    }
 
     // 1) 找到当前用户（以 Telegram ID 为准）
     const { data: dbUser, error: userErr } = await supabase

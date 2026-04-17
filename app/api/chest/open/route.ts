@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
+import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 import { z } from 'zod';
 
 interface CaseItemRow {
@@ -58,6 +59,18 @@ export async function POST(request: Request) {
         { error: 'Server configuration error' },
         { status: 500 }
       );
+    }
+
+    // SECURITY: 限流（20 req/min 粒度）
+    const rateLimitResult = await checkRateLimit(supabase, {
+      scope: telegramScope(tgUser.id),
+      route: 'chest/open',
+      limit: 20,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return rateLimitExceededResponse(rateLimitResult);
     }
 
     // 1. 从数据库获取宝箱的实时价格与 case_key（SECURITY: 防止客户端篡改价格）

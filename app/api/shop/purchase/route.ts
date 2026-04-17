@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
+import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
 // SECURITY: 购买会改变资产/库存，必须禁用 Next.js 缓存，确保每次请求都走真实后端逻辑
 export const dynamic = 'force-dynamic';
@@ -26,6 +27,18 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminClient();
+
+    // SECURITY: 限流（20 req/min 粒度，保护 shop_purchase RPC 与 DB）
+    const rateLimitResult = await checkRateLimit(supabase, {
+      scope: telegramScope(tgUser.id),
+      route: 'shop/purchase',
+      limit: 20,
+      windowSeconds: 60,
+    });
+
+    if (!rateLimitResult.allowed) {
+      return rateLimitExceededResponse(rateLimitResult);
+    }
 
     // SECURITY: 服务器端把 telegram_id 映射到内部 users.id（不信任前端传 userId）
     const { data: dbUser, error: userError } = await supabase
