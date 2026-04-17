@@ -13,7 +13,7 @@ export interface TelegramUser {
 const INIT_DATA_MAX_AGE_SECONDS = 24 * 3600;
 
 export function validateTelegramWebAppData(
-  telegramInitData: string
+  initData: string
 ): {
   isValid: boolean;
   user?: TelegramUser;
@@ -31,18 +31,18 @@ export function validateTelegramWebAppData(
     return { isValid: false, reason: 'missing_bot_token' };
   }
 
-  const initData = new URLSearchParams(telegramInitData);
-  const hash = initData.get('hash');
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
 
   if (!hash) {
     return { isValid: false, reason: 'missing_hash' };
   }
 
-  initData.delete('hash');
+  params.delete('hash');
 
   const dataToCheck: string[] = [];
-  initData.sort();
-  initData.forEach((value, key) => {
+  params.sort();
+  params.forEach((value, key) => {
     dataToCheck.push(`${key}=${value}`);
   });
 
@@ -55,7 +55,7 @@ export function validateTelegramWebAppData(
   }
 
   // 安全：校验 auth_date 新鲜度，防止泄露的 initData 被无限期重放
-  const authDateStr = initData.get('auth_date');
+  const authDateStr = params.get('auth_date');
   const authDate = Number(authDateStr);
   if (!authDateStr || !Number.isFinite(authDate) || authDate <= 0) {
     return { isValid: false, reason: 'missing_auth_date' };
@@ -66,7 +66,7 @@ export function validateTelegramWebAppData(
     return { isValid: false, reason: 'auth_date_expired' };
   }
 
-  const userStr = initData.get('user');
+  const userStr = params.get('user');
   if (userStr) {
     try {
       const user = JSON.parse(userStr) as TelegramUser;

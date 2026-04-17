@@ -28,14 +28,14 @@ export function useTelegramAuth() {
         // 尝试获取 Telegram initData
         try {
           const launchParams = retrieveLaunchParams();
-          // SDK 的类型可能把 initDataRaw 标成 {}，这里做严格处理以通过 TS build
+          // Telegram SDK 的字段名叫 initDataRaw（字符串）；业务层统一称其为 initData
           const lp = launchParams as unknown as {
             initDataRaw?: unknown;
             initData?: { user?: unknown };
           };
-          const raw = lp?.initDataRaw;
-          if (typeof raw === 'string') initData = raw;
-          else if (raw != null) initData = String(raw);
+          const launchParamsInitDataRaw = lp?.initDataRaw;
+          if (typeof launchParamsInitDataRaw === 'string') initData = launchParamsInitDataRaw;
+          else if (launchParamsInitDataRaw != null) initData = String(launchParamsInitDataRaw);
           // UI 用用户信息（不用于鉴权）
           // SECURITY: 前端拿到的 user 仅用于展示；所有敏感操作仍需服务端校验 initData 防止伪造
           if (lp?.initData?.user) {
