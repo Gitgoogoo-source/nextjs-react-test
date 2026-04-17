@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { z } from 'zod';
+import type { Database } from '@/types/supabase';
 
 // 校验资产变更参数
 const assetChangeSchema = z.object({
@@ -22,16 +23,62 @@ export async function syncUserAssets(initData: string) {
   }
 
   const supabase = createAdminClient();
-  
-  // 查询最新数据（telegram_id 为 bigint，对应 TS number）
+
+  // 新用户首次进入可能还没有 users 行；这里做幂等初始化，避免 PGRST116（0 行）导致“同步失败”
+  // SECURITY: 仅使用服务端验签后的 tg user.id 作为唯一身份，不信任客户端传 userId
+  const now = new Date().toISOString();
+  const bootstrapUser: Database['public']['Tables']['users']['Insert'] = {
+    telegram_id: user.id,
+    first_name: user.first_name || 'Guest',
+    last_name: user.last_name ?? null,
+    username: user.username ?? null,
+    avatar_url: user.photo_url ?? null,
+    balance: 1000,
+    stars: 0,
+    created_at: now,
+    updated_at: now,
+  };
+
+  // 尝试创建（若已存在则忽略），确保后续查询一定有行
+  const { error: bootstrapErr } = await supabase
+    .from('users')
+    .upsert(bootstrapUser, { onConflict: 'telegram_id', ignoreDuplicates: true });
+
+  if (bootstrapErr) {
+    console.error(`[Security] 初始化用户 ${user.id} 资产失败:`, bootstrapErr);
+    return { success: false, error: '数据库同步失败' };
+  }
+
+  // 处理邀请（share 链接新用户进入时会带 start_param），不阻塞主同步流程
+  // SECURITY: start_param 不可信；inviter/invitee 身份以服务端验签后的 tg user.id 为准
+  try {
+    const params = new URLSearchParams(initData);
+    const startParam = params.get('start_param');
+    const match = startParam?.match(/^ref_(\d+)$/);
+    const inviterTelegramId = match ? Number(match[1]) : null;
+    if (inviterTelegramId && Number.isFinite(inviterTelegramId)) {
+      const rewardAmount = Number(process.env.INVITE_REWARD_AMOUNT || 100);
+      await supabase.rpc('accept_invite_and_reward', {
+        p_inviter_telegram_id: inviterTelegramId,
+        p_invitee_telegram_id: user.id,
+        p_invite_code: startParam ?? `ref_${inviterTelegramId}`,
+        p_reward_type: 'coins',
+        p_amount: Number.isFinite(rewardAmount) && rewardAmount > 0 ? rewardAmount : 100,
+      });
+    }
+  } catch (e) {
+    console.warn('Invite processing skipped:', e);
+  }
+
+  // 查询最新数据（telegram_id 对应 TS number）
   const { data, error } = await supabase
     .from('users')
     .select('balance, stars')
     .eq('telegram_id', user.id)
-    .single();
+    .maybeSingle();
 
-  if (error) {
-    console.error(`[Security] 获取用户 ${user.id} 资产失败:`, error);
+  if (error || !data) {
+    console.error(`[Security] 获取用户 ${user.id} 资产失败:`, error ?? 'no row');
     return { success: false, error: '数据库同步失败' };
   }
 
