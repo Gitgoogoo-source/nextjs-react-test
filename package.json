@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
-    "@telegram-apps/sdk": "^3.11.8",
     "@telegram-apps/sdk-react": "^3.3.9",
     "canvas-confetti": "^1.9.4",
     "framer-motion": "^12.38.0",
