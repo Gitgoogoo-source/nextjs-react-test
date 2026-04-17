@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useUserStore } from '@/store/useUserStore';   // 使用 Zustand Store
-import { retrieveLaunchParams } from '@telegram-apps/sdk';
+import { retrieveLaunchParams, retrieveRawInitData } from '@telegram-apps/sdk-react';
 import { TelegramUser } from '@/lib/telegram';
 import { useChestStore } from '@/store/useChestStore';
 import { useCollectionStore } from '@/store/useCollectionStore';
@@ -42,18 +42,19 @@ export function useTelegramAuth() {
             parsedUser = lp.initData.user as TelegramUser;
           }
         } catch {
-          // ignore and fallback to window.Telegram below
+          // ignore and fallback to retrieveRawInitData below
         }
 
-        // 兜底：即使 retrieveLaunchParams 成功但 initDataRaw 为空，也要再从 Telegram WebApp 取一次
+        // 兜底：即使 retrieveLaunchParams 成功但 initDataRaw 为空，再从 SDK 支持的来源取一次
         // SECURITY: initData 仅作为服务端验签输入，服务端会校验签名防止伪造
         if (!initData) {
-          const win = window as unknown as {
-            Telegram?: { WebApp?: { initData?: unknown } };
-          };
-          const rawInitData = win.Telegram?.WebApp?.initData;
-          if (typeof rawInitData === 'string' && rawInitData.length > 0) {
-            initData = rawInitData;
+          try {
+            const raw = retrieveRawInitData();
+            if (typeof raw === 'string' && raw.length > 0) {
+              initData = raw;
+            }
+          } catch {
+            // ignore
           }
         }
 

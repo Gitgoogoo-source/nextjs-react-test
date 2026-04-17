@@ -35,13 +35,17 @@ async function fetchCollectionList(initData: string): Promise<CollectionListItem
     body: JSON.stringify({ initData }),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to fetch collection');
+  const body = (await res.json()) as {
+    success?: boolean;
+    data?: { items?: CollectionListItem[] };
+    error?: string;
+  };
+
+  if (!res.ok || !body.success) {
+    throw new Error(body.error || '加载藏品失败');
   }
 
-  const data = (await res.json()) as { items?: CollectionListItem[] };
-  return Array.isArray(data.items) ? data.items : [];
+  return Array.isArray(body.data?.items) ? body.data!.items : [];
 }
 
 export const useCollectionStore = create<CollectionState>((set, get) => ({

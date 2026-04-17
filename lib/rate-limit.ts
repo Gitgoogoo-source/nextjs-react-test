@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
+import type { ActionResult } from '@/lib/action-result';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -57,17 +58,19 @@ export function telegramScope(tgUserId: number | string): string {
   return `tg:${tgUserId}`;
 }
 
-// 生成 429 Too Many Requests 响应
+// 生成 429 Too Many Requests 响应（body 与 ActionResult 一致）
 export function rateLimitExceededResponse(result: RateLimitResult) {
-  return NextResponse.json(
-    { error: '请求过于频繁，请稍后再试' },
-    {
-      status: 429,
-      headers: {
-        'Retry-After': String(result.retryAfterSeconds || 1),
-        'X-RateLimit-Limit': String(result.limit),
-        'X-RateLimit-Remaining': String(result.remaining),
-      },
-    }
-  );
+  const body: ActionResult = {
+    success: false,
+    error: '请求过于频繁，请稍后再试',
+    code: 'rate_limited',
+  };
+  return NextResponse.json(body, {
+    status: 429,
+    headers: {
+      'Retry-After': String(result.retryAfterSeconds || 1),
+      'X-RateLimit-Limit': String(result.limit),
+      'X-RateLimit-Remaining': String(result.remaining),
+    },
+  });
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Copy, Gift, Link2, RefreshCcw, Users } from 'lucide-react';
+import { openTelegramLink, shareMessage } from '@telegram-apps/sdk-react';
 import { useUserStore } from '@/store/useUserStore';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 
@@ -12,18 +13,9 @@ type FriendsSummary = {
 };
 
 function openTelegramShare(shareUrl: string) {
-  const w = window as unknown as {
-    Telegram?: {
-      WebApp?: {
-        openTelegramLink?: (url: string) => void;
-        shareMessage?: (msgId: string) => void;
-      };
-    };
-  };
-
   try {
-    if (w.Telegram?.WebApp?.openTelegramLink) {
-      w.Telegram.WebApp.openTelegramLink(shareUrl);
+    if (openTelegramLink.isAvailable()) {
+      openTelegramLink(shareUrl);
       return;
     }
   } catch {
@@ -67,17 +59,18 @@ export default function FriendsView() {
         body: JSON.stringify({ initData }),
         cache: 'no-store',
       });
-      const json = (await res.json()) as unknown;
-      if (!res.ok) {
-        const message =
-          json && typeof json === 'object' && 'error' in json ? String((json as { error?: unknown }).error || '请求失败') : '请求失败';
-        throw new Error(message);
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: FriendsSummary;
+        error?: string;
+      };
+      if (!res.ok || !json.success || !json.data) {
+        throw new Error(json.error || '请求失败');
       }
 
-      const parsed = json as FriendsSummary;
       setSummary({
-        invitedCount: Number(parsed?.invitedCount || 0),
-        rewardTotal: Number(parsed?.rewardTotal || 0),
+        invitedCount: Number(json.data.invitedCount || 0),
+        rewardTotal: Number(json.data.rewardTotal || 0),
       });
     } catch (e) {
       const msg = typeof e === 'object' && e !== null && 'message' in e ? String((e as { message?: unknown }).message) : '加载失败';
@@ -101,15 +94,11 @@ export default function FriendsView() {
     // 组合方式（优先 2 再回退 1）：
     // 2) 服务端调用 Bot API savePreparedInlineMessage 生成 msg_id 后走 shareMessage（体验最好）
     // 1) 兜底走 startapp 深链接 + share/url 分享面板（归因最稳定）
-    const w = window as unknown as {
-      Telegram?: { WebApp?: { shareMessage?: (msgId: string) => void } };
-    };
-
-    if (initData && w.Telegram?.WebApp?.shareMessage) {
+    if (initData && shareMessage.isAvailable()) {
       try {
         // 若本地已有缓存，直接走 shareMessage
         if (preparedMsgId) {
-          w.Telegram.WebApp.shareMessage(preparedMsgId);
+          await shareMessage(preparedMsgId);
           return;
         }
 
@@ -119,11 +108,15 @@ export default function FriendsView() {
           body: JSON.stringify({ initData }),
           cache: 'no-store',
         });
-        const json = (await res.json()) as unknown;
-        if (res.ok && json && typeof json === 'object' && 'msgId' in json && typeof (json as { msgId?: unknown }).msgId === 'string') {
-          const msgId = (json as { msgId: string }).msgId;
+        const json = (await res.json()) as {
+          success?: boolean;
+          data?: { msgId?: string };
+          error?: string;
+        };
+        if (res.ok && json.success && json.data && typeof json.data.msgId === 'string') {
+          const msgId = json.data.msgId;
           setPreparedMsgId(msgId);
-          w.Telegram.WebApp.shareMessage(msgId);
+          await shareMessage(msgId);
           return;
         }
       } catch {

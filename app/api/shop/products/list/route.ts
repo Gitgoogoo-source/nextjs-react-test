@@ -1,8 +1,10 @@
-import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { jsonActionErr, jsonActionOk } from '@/lib/api-json';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
+
+export const dynamic = 'force-dynamic';
 
 const listProductsSchema = z.object({
   initData: z.string().min(1),
@@ -16,7 +18,7 @@ export async function POST(request: Request) {
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId（即使只是读接口也按公开端点处理）
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return jsonActionErr('身份验证失败', 401);
     }
 
     const supabase = createAdminClient();
@@ -56,17 +58,17 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('Error fetching shop products:', error);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
-    return NextResponse.json({ success: true, products: data ?? [] });
+    return jsonActionOk({ products: data ?? [] });
   } catch (error: unknown) {
     const err = error as { name?: string };
     if (err?.name === 'ZodError') {
-      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+      return jsonActionErr('请求参数无效', 400);
     }
     console.error('Error in shop products list route:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonActionErr('服务器内部错误', 500);
   }
 }
 

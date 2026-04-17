@@ -1,22 +1,23 @@
-import { NextResponse } from 'next/server';
+import { jsonActionErr, jsonActionOk } from '@/lib/api-json';
+import { revalidateGameRoot } from '@/lib/revalidate-game';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
+import type { Database } from '@/types/supabase';
 import { z } from 'zod';
 
-interface CaseItemRow {
-  item_id: string;
-  drop_chance: number | string;
-}
+export const dynamic = 'force-dynamic';
 
-interface ItemRow {
-  id: string;
-  name: string;
-  rarity: string;
-  color: string;
-  border: string;
-  hex: string;
-}
+/** 与 .select('item_id, drop_chance') 对齐，来源于 case_items.Row */
+type CaseItemDropRow = Pick<
+  Database['public']['Tables']['case_items']['Row'],
+  'item_id' | 'drop_chance'
+>;
+/** 与 .select('id, name, rarity, color, border, hex') 对齐，来源于 items.Row */
+type ItemDisplayRow = Pick<
+  Database['public']['Tables']['items']['Row'],
+  'id' | 'name' | 'rarity' | 'color' | 'border' | 'hex'
+>;
 
 function pickWeightedItem(rows: { item_id: string; weight: number }[]) {
   const total = rows.reduce((acc, r) => acc + r.weight, 0);
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return jsonActionErr('身份验证失败', 401);
     }
 
     let supabase;
@@ -55,10 +56,7 @@ export async function POST(request: Request) {
       supabase = createAdminClient();
     } catch (error) {
       console.error('Error creating admin client:', error);
-      return NextResponse.json(
-        { error: 'Server configuration error' },
-        { status: 500 }
-      );
+      return jsonActionErr('服务器配置错误', 500);
     }
 
     // SECURITY: 限流（20 req/min 粒度）
@@ -82,13 +80,13 @@ export async function POST(request: Request) {
 
     if (chestInfoError || !chestInfo) {
       console.error('Error fetching chest price:', chestInfoError);
-      return NextResponse.json({ error: 'Chest type not found in database' }, { status: 404 });
+      return jsonActionErr('数据库中未找到该宝箱类型', 404);
     }
 
     // SECURITY: 使用数据库中的价格，而不是前端传来的价格（RPC 侧期望 integer）
     const price = Number(chestInfo.price ?? 0);
     if (!Number.isSafeInteger(price) || price <= 0) {
-      return NextResponse.json({ error: 'Invalid chest price' }, { status: 400 });
+      return jsonActionErr('宝箱价格无效', 400);
     }
 
     // SECURITY: 掉率与奖池以 case_items 为准（后台可配置，避免硬编码与前端篡改）
@@ -99,16 +97,16 @@ export async function POST(request: Request) {
 
     if (caseItemsError) {
       console.error('Error fetching case_items:', caseItemsError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
     const normalized = (caseItems || [])
-      .map((r) => r as CaseItemRow)
+      .map((r) => r as CaseItemDropRow)
       .filter((r) => r.item_id && Number(r.drop_chance) > 0)
       .map((r) => ({ item_id: r.item_id, weight: Number(r.drop_chance) }));
 
     if (normalized.length === 0) {
-      return NextResponse.json({ error: 'Chest drop table not configured' }, { status: 500 });
+      return jsonActionErr('宝箱掉落表未配置', 500);
     }
 
     // 2. 获取用户信息
@@ -119,7 +117,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (userError || !dbUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return jsonActionErr('用户不存在', 404);
     }
 
     // 3. 检查用户是否拥有该宝箱
@@ -131,18 +129,18 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (caseError || !userCase || userCase.quantity <= 0) {
-      return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+      return jsonActionErr('宝箱数量不足', 400);
     }
 
     // 4. 检查余额是否足够
     if (Number(dbUser.balance ?? 0) < price) {
-      return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+      return jsonActionErr('叶子不足', 400);
     }
 
     // 5. 按数据库权重抽取 item_id（可不要求总和=100，按 total 归一化）
     const itemUuid = pickWeightedItem(normalized);
     if (!itemUuid) {
-      return NextResponse.json({ error: 'Chest drop table invalid' }, { status: 500 });
+      return jsonActionErr('宝箱掉落表无效', 500);
     }
 
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
@@ -171,12 +169,12 @@ export async function POST(request: Request) {
       console.error('RPC Error (open_chest_secure):', rpcError);
       const msg = rpcError.message || '';
       if (msg.includes('Insufficient balance')) {
-        return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
+        return jsonActionErr('叶子不足', 400);
       }
       if (msg.includes('Not enough chests')) {
-        return NextResponse.json({ error: 'Not enough chests' }, { status: 400 });
+        return jsonActionErr('宝箱数量不足', 400);
       }
-      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+      return jsonActionErr('服务器内部错误', 500);
     }
 
     const parsedRpc = rpcData as RpcResult;
@@ -198,7 +196,7 @@ export async function POST(request: Request) {
 
     if (finalItemInfoError || !finalItemInfo) {
       console.error('Error fetching final item info:', finalItemInfoError);
-      return NextResponse.json({ error: 'Prize item not found' }, { status: 500 });
+      return jsonActionErr('奖品物品不存在', 500);
     }
 
     // 生成随机偏移量 (-30 到 30)
@@ -228,17 +226,19 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({
-      wonItem: finalItemInfo as ItemRow,
+    revalidateGameRoot();
+
+    return jsonActionOk({
+      wonItem: finalItemInfo as ItemDisplayRow,
       randomOffset,
       userAssets,
     });
   } catch (error: unknown) {
     const err = error as { name?: string };
     if (err?.name === 'ZodError') {
-      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+      return jsonActionErr('请求参数无效', 400);
     }
     console.error('Error opening chest:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonActionErr('服务器内部错误', 500);
   }
 }

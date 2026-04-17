@@ -13,7 +13,7 @@ import {
   Star,
   Leaf
 } from 'lucide-react';
-import { postEvent } from '@telegram-apps/sdk';
+import { postEvent } from '@telegram-apps/sdk-react';
 import Image from 'next/image';
 
 import ChestView from './ChestView';

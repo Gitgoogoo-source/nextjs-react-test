@@ -1,10 +1,12 @@
 'use client';
 
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
+import { ensureTelegramSdk } from '@/lib/telegram-sdk-client';
 import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
 export function TelegramAuthProvider({ children }: { children: React.ReactNode }) {
+  ensureTelegramSdk();
   const { isSyncing, error } = useTelegramAuth();
 
   if (isSyncing) {

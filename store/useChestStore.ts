@@ -36,13 +36,17 @@ async function fetchChestList(initData: string): Promise<ChestListItem[]> {
     body: JSON.stringify({ initData }),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to fetch chests');
+  const body = (await res.json()) as {
+    success?: boolean;
+    data?: { chests?: ChestListItem[] };
+    error?: string;
+  };
+
+  if (!res.ok || !body.success) {
+    throw new Error(body.error || '加载宝箱失败');
   }
 
-  const data = (await res.json()) as { chests?: ChestListItem[] };
-  return Array.isArray(data.chests) ? data.chests : [];
+  return Array.isArray(body.data?.chests) ? body.data!.chests : [];
 }
 
 export const useChestStore = create<ChestState>((set, get) => ({

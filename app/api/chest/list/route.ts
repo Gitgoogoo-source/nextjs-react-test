@@ -1,19 +1,22 @@
-import { NextResponse } from 'next/server';
+import { jsonActionErr, jsonActionOk } from '@/lib/api-json';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
+import type { Database } from '@/types/supabase';
 import { z } from 'zod';
 
-interface UserCaseRow {
-  case_id: string; // uuid string
-  quantity: number;
-}
+export const dynamic = 'force-dynamic';
 
-interface CaseRow {
-  id: string; // uuid string
-  price: number | string;
-  case_key: string | null;
-}
+/** 与 .select('case_id, quantity') 对齐，来源于 user_cases.Row */
+type UserCaseInventoryRow = Pick<
+  Database['public']['Tables']['user_cases']['Row'],
+  'case_id' | 'quantity'
+>;
+/** 与 .select('id, price, case_key') 对齐，来源于 cases.Row */
+type CasePriceRow = Pick<
+  Database['public']['Tables']['cases']['Row'],
+  'id' | 'price' | 'case_key'
+>;
 
 // 宝箱类型的前端配置映射（静态属性：颜色、图标、描述等）
 // SECURITY: 不包含价格，价格必须从数据库 cases 表读取
@@ -61,7 +64,7 @@ export async function POST(request: Request) {
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return jsonActionErr('身份验证失败', 401);
     }
 
     let supabase;
@@ -69,10 +72,7 @@ export async function POST(request: Request) {
       supabase = createAdminClient();
     } catch (error) {
       console.error('Error creating admin client:', error);
-      return NextResponse.json(
-        { error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY missing' },
-        { status: 500 }
-      );
+      return jsonActionErr('服务器配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY', 500);
     }
 
     // SECURITY: 限流（30 req/min 粒度）
@@ -96,10 +96,7 @@ export async function POST(request: Request) {
 
     if (userError || !user) {
       console.error('User not found:', userError);
-      return NextResponse.json(
-        { error: 'User not found. Please sync Telegram user first.' },
-        { status: 404 }
-      );
+      return jsonActionErr('用户不存在，请先完成 Telegram 同步', 404);
     }
 
     // 2. 读取用户持有的宝箱类型和数量
@@ -111,11 +108,11 @@ export async function POST(request: Request) {
 
     if (chestsError) {
       console.error('Error fetching chests:', chestsError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
     // 3. 从数据库 cases 表读取宝箱价格与 case_key（SECURITY: 确保价格与数据库一致）
-    const typedUserChests = (userChests || []) as UserCaseRow[];
+    const typedUserChests = (userChests || []) as UserCaseInventoryRow[];
     const caseIds = typedUserChests.map((c) => c.case_id).filter(Boolean);
     const chestDetails: Record<string, { price: number; case_key: string | null }> = {};
 
@@ -127,11 +124,11 @@ export async function POST(request: Request) {
 
       if (casesError) {
         console.error('Error fetching cases:', casesError);
-        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+        return jsonActionErr('数据库错误', 500);
       }
 
       (casesData || []).forEach((c) => {
-        const row = c as CaseRow;
+        const row = c as CasePriceRow;
         chestDetails[row.id] = { price: Number(row.price) || 0, case_key: row.case_key ?? null };
       });
     }
@@ -160,13 +157,13 @@ export async function POST(request: Request) {
       };
     });
 
-    return NextResponse.json({ success: true, chests: enrichedChests });
+    return jsonActionOk({ chests: enrichedChests });
   } catch (error: unknown) {
     const err = error as { name?: string };
     if (err?.name === 'ZodError') {
-      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+      return jsonActionErr('请求参数无效', 400);
     }
     console.error('Error in chest list route:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonActionErr('服务器内部错误', 500);
   }
 }

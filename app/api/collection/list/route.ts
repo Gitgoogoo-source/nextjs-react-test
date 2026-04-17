@@ -1,22 +1,22 @@
-import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { jsonActionErr, jsonActionOk } from '@/lib/api-json';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
+import type { Database } from '@/types/supabase';
 
-interface UserItemRow {
-  item_id: string;
-  quantity: number;
-}
+export const dynamic = 'force-dynamic';
 
-interface ItemRow {
-  id: string;
-  name: string;
-  rarity: string;
-  color: string;
-  border: string;
-  hex: string;
-}
+/** 与 .select('item_id, quantity') 对齐，来源于 user_items.Row */
+type UserItemInventoryRow = Pick<
+  Database['public']['Tables']['user_items']['Row'],
+  'item_id' | 'quantity'
+>;
+/** 与 .select('id, name, rarity, color, border, hex') 对齐，来源于 items.Row */
+type ItemDisplayRow = Pick<
+  Database['public']['Tables']['items']['Row'],
+  'id' | 'name' | 'rarity' | 'color' | 'border' | 'hex'
+>;
 
 const listCollectionSchema = z.object({
   initData: z.string().min(1),
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return jsonActionErr('身份验证失败', 401);
     }
 
     let supabase;
@@ -38,10 +38,7 @@ export async function POST(request: Request) {
       supabase = createAdminClient();
     } catch (error) {
       console.error('Error creating admin client:', error);
-      return NextResponse.json(
-        { error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY missing' },
-        { status: 500 }
-      );
+      return jsonActionErr('服务器配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY', 500);
     }
 
     // SECURITY: 限流（30 req/min 粒度）
@@ -65,10 +62,7 @@ export async function POST(request: Request) {
 
     if (userError || !user) {
       console.error('User not found:', userError);
-      return NextResponse.json(
-        { error: 'User not found. Please sync Telegram user first.' },
-        { status: 404 }
-      );
+      return jsonActionErr('用户不存在，请先完成 Telegram 同步', 404);
     }
 
     // 2) 读取用户持有的藏品数量（只拿 item_id + quantity）
@@ -80,13 +74,13 @@ export async function POST(request: Request) {
 
     if (userItemsError) {
       console.error('Error fetching user_items:', userItemsError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
-    const typedUserItems = (userItems || []) as UserItemRow[];
+    const typedUserItems = (userItems || []) as UserItemInventoryRow[];
     const itemIds = typedUserItems.map((r) => r.item_id).filter(Boolean);
 
-    const itemDetails: Record<string, ItemRow> = {};
+    const itemDetails: Record<string, ItemDisplayRow> = {};
     if (itemIds.length > 0) {
       const { data: itemsData, error: itemsError } = await supabase
         .from('items')
@@ -95,11 +89,11 @@ export async function POST(request: Request) {
 
       if (itemsError) {
         console.error('Error fetching items:', itemsError);
-        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+        return jsonActionErr('数据库错误', 500);
       }
 
       (itemsData || []).forEach((it) => {
-        const row = it as ItemRow;
+        const row = it as ItemDisplayRow;
         itemDetails[row.id] = row;
       });
     }
@@ -121,14 +115,14 @@ export async function POST(request: Request) {
       })
       .filter(Boolean);
 
-    return NextResponse.json({ success: true, items: enriched });
+    return jsonActionOk({ items: enriched });
   } catch (error: unknown) {
     const err = error as { name?: string };
     if (err?.name === 'ZodError') {
-      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 });
+      return jsonActionErr('请求参数无效', 400);
     }
     console.error('Error in collection list route:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonActionErr('服务器内部错误', 500);
   }
 }
 

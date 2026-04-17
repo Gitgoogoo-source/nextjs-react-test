@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { syncUserAssets, processAssetChange } from "@/actions/asset-actions";
+import { syncUserAssets, processAssetChange } from "@/app/actions/asset-actions";
 
 interface UserState {
   balance: number;
@@ -116,7 +116,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       }
 
       // 更新为最终服务器确认的余额
-      set({ [params.type]: Number(response.newBalance) });
+      set({ [params.type]: Number(response.data?.newBalance) });
     } catch (err: unknown) {
       // 4. 回滚状态
       const message =

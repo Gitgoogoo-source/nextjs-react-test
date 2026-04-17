@@ -46,11 +46,15 @@ async function fetchShopProducts(initData: string): Promise<ShopProduct[]> {
     throw new Error(err.error || 'Failed to fetch shop products');
   }
 
-  const data = (await res.json()) as { success?: boolean; products?: ShopProduct[]; error?: string };
-  if (!data?.success) {
-    throw new Error(data?.error || '加载商城失败');
+  const body = (await res.json()) as {
+    success?: boolean;
+    data?: { products?: ShopProduct[] };
+    error?: string;
+  };
+  if (!body?.success || !body.data) {
+    throw new Error(body?.error || '加载商城失败');
   }
-  return Array.isArray(data.products) ? data.products : [];
+  return Array.isArray(body.data.products) ? body.data.products : [];
 }
 
 export const useShopStore = create<ShopState>((set, get) => ({

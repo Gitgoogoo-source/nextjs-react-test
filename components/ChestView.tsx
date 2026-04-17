@@ -5,6 +5,7 @@ import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplat
 import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
+import { telegramHapticImpact, telegramHapticNotify } from '@/lib/telegram-haptics';
 import { useUserStore } from '@/store/useUserStore';
 import { useChestStore, type ChestListItem } from '@/store/useChestStore';
 import { useCollectionStore } from '@/store/useCollectionStore';
@@ -79,12 +80,10 @@ const playTickSound = () => {
   }
 };
 
-// 触发 Telegram 震动
+// 触发 Telegram 震动（经 @telegram-apps/sdk-react）
 const triggerHaptic = () => {
   try {
-    if (window.Telegram?.WebApp?.HapticFeedback) {
-      window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-    }
+    telegramHapticImpact('light');
   } catch (e) {
     console.error('Haptic feedback failed', e);
   }
@@ -255,16 +254,21 @@ export default function ChestView() {
         body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData })
       });
       
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to open chest');
-      }
-      
-      const { wonItem: wonItemFromServer, randomOffset, userAssets } = (await response.json()) as {
-        wonItem: PrizeViewItem;
-        randomOffset: number;
-        userAssets?: { balance: number; stars: number };
+      const body = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+        data?: {
+          wonItem: PrizeViewItem;
+          randomOffset: number;
+          userAssets?: { balance: number; stars: number };
+        };
       };
+
+      if (!response.ok || !body.success || !body.data) {
+        throw new Error(body.error || '开启宝箱失败');
+      }
+
+      const { wonItem: wonItemFromServer, randomOffset, userAssets } = body.data;
 
       // 关键修复：开箱成功后，立即用服务端回传的最新资产刷新顶部 UI
       // SECURITY: 资产只接受服务端回传（DB 真实值），前端不做任何结算
@@ -327,9 +331,7 @@ export default function ChestView() {
     
     // 最终中奖时的强烈震动
     try {
-      if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-      }
+      telegramHapticNotify('success');
     } catch {}
     
     if (wonItem) {

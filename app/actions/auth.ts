@@ -1,11 +1,24 @@
 'use server';
 
 import { createAdminClient } from '@/lib/supabase/admin';
-import { validateTelegramWebAppData } from '@/lib/telegram';
+import type { ActionResult } from '@/lib/action-result';
+import { revalidateGameRoot } from '@/lib/revalidate-game';
+import { validateTelegramWebAppData, type TelegramUser } from '@/lib/telegram';
+import { z } from 'zod';
 
-export async function syncTelegramUser(initData: string) {
+// 入参：initData 须为非空字符串（与前端显式传递的 Telegram WebApp initData 一致）
+const syncTelegramUserInputSchema = z.string().min(1, '缺少 initData');
+
+export async function syncTelegramUser(initData: string): Promise<ActionResult<TelegramUser>> {
+  const inputParsed = syncTelegramUserInputSchema.safeParse(initData);
+  if (!inputParsed.success) {
+    return { success: false, error: '参数无效' };
+  }
+  const initDataValidated = inputParsed.data;
+
   try {
-    const { isValid, user, reason } = validateTelegramWebAppData(initData);
+    // 安全：已验证 Telegram initData 防止请求伪造
+    const { isValid, user, reason } = validateTelegramWebAppData(initDataValidated);
 
     if (!isValid || !user) {
       if (reason === 'missing_bot_token') {
@@ -77,9 +90,9 @@ export async function syncTelegramUser(initData: string) {
     }
 
     // 处理邀请：从 initData 里解析 start_param（startapp 参数会落在 start_param）
-    // SECURITY: start_param 不可信；inviter/ invitee 身份以服务端验签后的 tg user.id 为准
+    // start_param 不可信；邀请人/被邀请人身份以服务端验签后的 tg user.id 为准
     try {
-      const params = new URLSearchParams(initData);
+      const params = new URLSearchParams(initDataValidated);
       const startParam = params.get('start_param');
       const match = startParam?.match(/^ref_(\d+)$/);
       const inviterTelegramId = match ? Number(match[1]) : null;
@@ -99,7 +112,9 @@ export async function syncTelegramUser(initData: string) {
       console.warn('Invite processing skipped:', e);
     }
 
-    return { success: true, user };
+    revalidateGameRoot();
+
+    return { success: true, data: user };
   } catch (error) {
     console.error('Sync error:', error);
     return { success: false, error: 'Internal server error' };

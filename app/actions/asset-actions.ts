@@ -1,6 +1,8 @@
 'use server';
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import type { ActionResult } from '@/lib/action-result';
+import { revalidateGameRoot } from '@/lib/revalidate-game';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { z } from 'zod';
 import type { Database } from '@/types/supabase';
@@ -16,7 +18,9 @@ const assetChangeSchema = z.object({
  * 同步用户资产 (登录时调用)
  * SECURITY: 验证 Telegram initData 确保身份真实性
  */
-export async function syncUserAssets(initData: string) {
+export async function syncUserAssets(
+  initData: string
+): Promise<ActionResult<{ balance: number; stars: number }>> {
   const { isValid, user } = validateTelegramWebAppData(initData);
   if (!isValid || !user) {
     return { success: false, error: '身份验证失败' };
@@ -82,6 +86,8 @@ export async function syncUserAssets(initData: string) {
     return { success: false, error: '数据库同步失败' };
   }
 
+  revalidateGameRoot();
+
   return { 
     success: true, 
     data: {
@@ -97,7 +103,10 @@ type AssetChangeParams = z.infer<typeof assetChangeSchema>;
  * 执行资产变更 (消费或奖励)
  * 使用 RPC 确保 users 表更新与 resource_transactions 插入的原子性
  */
-export async function processAssetChange(initData: string, params: AssetChangeParams) {
+export async function processAssetChange(
+  initData: string,
+  params: AssetChangeParams
+): Promise<ActionResult<{ newBalance: number | undefined }>> {
   const { isValid, user } = validateTelegramWebAppData(initData);
   if (!isValid || !user) {
     return { success: false, error: '身份验证失败' };
@@ -119,8 +128,13 @@ export async function processAssetChange(initData: string, params: AssetChangePa
     return { success: false, error: error.message };
   }
 
+  revalidateGameRoot();
+
+  const raw = (data as unknown as { new_balance?: number | string } | null)?.new_balance;
   return {
     success: true,
-    newBalance: (data as unknown as { new_balance?: number | string } | null)?.new_balance
+    data: {
+      newBalance: raw !== undefined ? Number(raw) : undefined,
+    },
   };
 }

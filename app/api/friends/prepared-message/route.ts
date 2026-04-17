@@ -1,10 +1,16 @@
-import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { z } from 'zod';
+import { jsonActionErr, jsonActionOk } from '@/lib/api-json';
+import { revalidateGameRoot } from '@/lib/revalidate-game';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
+
+const preparedMessageBodySchema = z.object({
+  initData: z.string().min(1, '缺少 initData'),
+});
 
 type PreparedMessageResponse = {
   msgId: string;
@@ -17,20 +23,23 @@ function getEnv(name: string) {
 
 export async function POST(request: Request) {
   try {
-    const body: unknown = await request.json().catch(() => null);
-    const initData =
-      body && typeof body === 'object' && 'initData' in body && typeof (body as { initData?: unknown }).initData === 'string'
-        ? (body as { initData: string }).initData
-        : '';
-
-    if (!initData) {
-      return NextResponse.json({ error: '缺少 initData' }, { status: 400 });
+    let rawBody: unknown;
+    try {
+      rawBody = await request.json();
+    } catch {
+      return jsonActionErr('请求体无效', 400);
     }
 
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造身份
+    const parsed = preparedMessageBodySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return jsonActionErr('参数无效', 400);
+    }
+    const { initData } = parsed.data;
+
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return jsonActionErr('身份验证失败', 401);
     }
 
     const supabase = createAdminClient();
@@ -51,7 +60,7 @@ export async function POST(request: Request) {
     const botToken = getEnv('TELEGRAM_BOT_TOKEN');
     const botUsername = getEnv('NEXT_PUBLIC_TELEGRAM_BOT_USERNAME');
     if (!botToken || !botUsername) {
-      return NextResponse.json({ error: 'Bot 未配置' }, { status: 500 });
+      return jsonActionErr('Bot 未配置', 500);
     }
 
     // 1) 找到当前用户（inviter）
@@ -62,7 +71,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (userErr || !dbUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return jsonActionErr('用户不存在', 404);
     }
 
     // 2) 命中缓存则直接返回（避免频繁调用 Bot API）
@@ -75,12 +84,12 @@ export async function POST(request: Request) {
 
     if (cacheErr) {
       console.error('prepared msg cache error:', cacheErr);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
     if (cached?.msg_id) {
       const res: PreparedMessageResponse = { msgId: String(cached.msg_id) };
-      return NextResponse.json(res);
+      return jsonActionOk(res);
     }
 
     // 3) 生成 startapp 深链接（归因用）
@@ -119,14 +128,14 @@ export async function POST(request: Request) {
     const tgJson = (await tgRes.json().catch(() => null)) as unknown;
     if (!tgRes.ok || !tgJson || typeof tgJson !== 'object') {
       console.error('telegram savePreparedInlineMessage failed:', tgRes.status, tgJson);
-      return NextResponse.json({ error: 'Telegram API error' }, { status: 502 });
+      return jsonActionErr('Telegram API 调用失败', 502);
     }
 
     const ok = (tgJson as { ok?: unknown }).ok === true;
     const msgId = ok ? (tgJson as { result?: { id?: unknown } }).result?.id : null;
     if (!ok || typeof msgId !== 'string' || msgId.length === 0) {
       console.error('telegram savePreparedInlineMessage bad response:', tgJson);
-      return NextResponse.json({ error: 'Telegram API error' }, { status: 502 });
+      return jsonActionErr('Telegram API 调用失败', 502);
     }
 
     // 5) 写缓存（幂等：UNIQUE(user_id, kind)）
@@ -144,11 +153,13 @@ export async function POST(request: Request) {
       // 缓存失败不影响返回 msg_id
     }
 
+    revalidateGameRoot();
+
     const res: PreparedMessageResponse = { msgId };
-    return NextResponse.json(res);
+    return jsonActionOk(res);
   } catch (error) {
     console.error('prepared-message error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonActionErr('服务器内部错误', 500);
   }
 }
 

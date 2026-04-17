@@ -78,14 +78,6 @@ export function deepClone<T>(obj: T): T {
 }
 
 /**
- * 判断是否在 Telegram WebApp 环境中
- */
-export function isTelegramWebApp(): boolean {
-  if (typeof window === 'undefined') return false;
-  return !!window.Telegram?.WebApp;
-}
-
-/**
  * 安全获取本地存储（支持 SSR）
  */
 export function getLocalStorage(key: string, defaultValue: string = ''): string {
@@ -109,39 +101,3 @@ export function setLocalStorage(key: string, value: string): void {
   }
 }
 
-/**
- * 声明全局 Telegram 类型
- */
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp?: {
-        ready: () => void;
-        expand: () => void;
-        close: () => void;
-        showAlert: (message: string) => void;
-        showConfirm: (message: string, callback: (confirmed: boolean) => void) => void;
-        HapticFeedback: {
-          impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
-          notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
-          selectionChanged: () => void;
-        };
-        initDataUnsafe: {
-          user?: {
-            id: number;
-            first_name: string;
-            last_name?: string;
-            username?: string;
-          };
-        };
-        version: string;
-        platform: string;
-        colorScheme: 'light' | 'dark';
-        themeParams: Record<string, string>;
-        isExpanded: boolean;
-        viewportHeight: number;
-        viewportStableHeight: number;
-      };
-    };
-  }
-}

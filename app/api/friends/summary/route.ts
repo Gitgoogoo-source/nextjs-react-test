@@ -1,9 +1,14 @@
-import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { jsonActionErr, jsonActionOk } from '@/lib/api-json';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
+
+const friendsSummaryBodySchema = z.object({
+  initData: z.string().min(1, '缺少 initData'),
+});
 
 type FriendsSummaryResponse = {
   invitedCount: number;
@@ -12,20 +17,23 @@ type FriendsSummaryResponse = {
 
 export async function POST(request: Request) {
   try {
-    const body: unknown = await request.json().catch(() => null);
-    const initData =
-      body && typeof body === 'object' && 'initData' in body && typeof (body as { initData?: unknown }).initData === 'string'
-        ? (body as { initData: string }).initData
-        : '';
-
-    if (!initData) {
-      return NextResponse.json({ error: '缺少 initData' }, { status: 400 });
+    let rawBody: unknown;
+    try {
+      rawBody = await request.json();
+    } catch {
+      return jsonActionErr('请求体无效', 400);
     }
 
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造身份
+    const parsed = friendsSummaryBodySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return jsonActionErr('参数无效', 400);
+    }
+    const { initData } = parsed.data;
+
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
-      return NextResponse.json({ error: '身份验证失败' }, { status: 401 });
+      return jsonActionErr('身份验证失败', 401);
     }
 
     const supabase = createAdminClient();
@@ -50,7 +58,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (userErr || !dbUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      return jsonActionErr('用户不存在', 404);
     }
 
     // 2) 邀请人数：以 user_invites.inviter_user_id 统计（不在前端传 userId，避免篡改）
@@ -61,7 +69,7 @@ export async function POST(request: Request) {
 
     if (inviteCountErr) {
       console.error('invite count error:', inviteCountErr);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
     // 3) 奖励总额：仅统计已发放（granted）的数值奖励 amount（item 奖励 amount 可能为空）
@@ -73,7 +81,7 @@ export async function POST(request: Request) {
 
     if (rewardsErr) {
       console.error('invite rewards error:', rewardsErr);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return jsonActionErr('数据库错误', 500);
     }
 
     const rewardTotal = (rewards || []).reduce((acc, r) => acc + Number(r.amount || 0), 0);
@@ -83,10 +91,10 @@ export async function POST(request: Request) {
       rewardTotal,
     };
 
-    return NextResponse.json(res);
+    return jsonActionOk(res);
   } catch (error) {
     console.error('friends summary error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonActionErr('服务器内部错误', 500);
   }
 }
 

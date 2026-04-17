@@ -50,7 +50,11 @@
 ## 6. Next.js 架构与服务端约束
 - **App Router 规范**：使用 Next.js App Router (`app/` 目录)。默认使用 Server Components (RSC)，仅在需要交互或调用 Telegram SDK 时使用 Client Components (`"use client"`)。
 - **公共端点检查**：将所有的 Server Actions (`"use server"`) 和 API Routes 视为公开端点，必须使用 `zod` 严格验证入参，并在入口调用 `validateTelegramWebAppData(initData)` 校验用户身份。
-- **禁用缓存（针对游戏状态）**：对于获取或修改游戏状态的路由，必须显式禁用缓存（使用 `export const dynamic = 'force-dynamic'`）。状态更新后，必须使用 `revalidatePath` 或 `revalidateTag` 确保 UI 刷新。
+- **禁用缓存（针对游戏状态）**：对于获取或修改游戏状态的路由，必须显式禁用缓存（使用 `export const dynamic = 'force-dynamic'`）。状态更新后，必须使用 `revalidatePath` 或 `revalidateTag` 确保服务端渲染层不会长期持有陈旧数据。
+- **revalidatePath 策略（本项目约定）**：
+  - 当前小游戏以 **客户端 Zustand** 与 **接口回包** 为主刷新 UI；`revalidatePath` 主要防止未来在 RSC 中读库或启用 Partial Prerender 时根路由仍用旧缓存。
+  - 凡 **持久化游戏状态发生变更** 且请求成功：在 Server Action 或 Route Handler 返回前调用 `lib/revalidate-game.ts` 中的 `revalidateGameRoot()`（内部为 `revalidatePath('/')`）。已接入：`app/actions/auth.ts`、`app/actions/asset-actions.ts`，以及会写库的 API（如开箱、商城购买、`friends/prepared-message` 在首次生成并写入缓存时）。
+  - **纯只读** 的查询类 API（如列表）不必调用；**仅命中已有缓存、无新写入** 的成功响应也可不调用。
 - **无服务器限制**：Vercel Serverless 函数有执行超时限制（如 10s/15s）。禁止在 Next.js API 路由中编写长时间运行的后台循环、长轮询或 WebSocket 服务。如需实时同步，请在客户端使用 Supabase Realtime。
 
 ## 7. 前端 UI 与原生体验
@@ -106,16 +110,18 @@
 ## 附录：实现模板
 
 ### A. Server Action 标准返回类型
-所有 Server Action 和 API Route 必须使用统一的返回结构：
+所有 Server Action 和 **返回 JSON 的** API Route（`NextResponse.json`）必须使用统一的返回结构；类型定义在 `lib/action-result.ts`，Route 侧可用 `lib/api-json.ts` 中的 `jsonActionOk` / `jsonActionErr` 构造响应。
 
 ```typescript
 type ActionResult<T = unknown> = {
   success: boolean;
   data?: T;
   error?: string; // 用户可读的中文错误提示
+  code?: string; // 可选：机器可读错误码（如 rate_limited）
 };
 ```
-> 约定：成功时返回 `{ success: true, data }`；失败时返回 `{ success: false, error: '...' }`。如需区分错误类型，可追加机器可读的 `code` 字段，但仍保留 `success` / `error` 两个核心字段，保持与既有 `app/actions/auth.ts`、`actions/asset-actions.ts` 一致。
+> 约定：成功时返回 `{ success: true, data }`；失败时返回 `{ success: false, error: '...' }`。如需区分错误类型，可追加机器可读的 `code` 字段，但仍保留 `success` / `error` 两个核心字段。  
+> **与 HTTP 状态码的关系**：认证失败、限流、参数错误等仍用 **401 / 429 / 400 / 500** 等状态码表达语义；响应 body 与 Server Action 一样使用 `ActionResult`，便于前端用同一套分支处理（先判断 `res.ok` / HTTP，再读 `success` / `error` / `data`）。**非 JSON 响应**（如未来文件流、重定向）不适用本结构，需在接口文档中单独说明。
 
 ### B. 服务端 Supabase 客户端初始化（@supabase/supabase-js）
 项目已在 `lib/supabase/admin.ts` 中封装好唯一入口，**新端点请直接 `import { createAdminClient } from '@/lib/supabase/admin'`，不要另外 new 一个**。

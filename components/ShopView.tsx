@@ -4,6 +4,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ShoppingBag, Sparkles, RefreshCcw, AlertTriangle, Loader2 } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
+import {
+  telegramHapticImpact as sdkHapticImpact,
+  telegramHapticNotify as sdkHapticNotify,
+} from '@/lib/telegram-haptics';
 import { useUserStore } from '@/store/useUserStore';
 import { useShopStore } from '@/store/useShopStore';
 import { useChestStore } from '@/store/useChestStore';
@@ -36,7 +40,7 @@ function currencyLabel(currency: string) {
 
 function hapticImpact(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') {
   try {
-    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
+    sdkHapticImpact(style);
   } catch {
     // 忽略：非 Telegram 环境或不支持触感
   }
@@ -44,7 +48,7 @@ function hapticImpact(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') {
 
 function hapticNotify(type: 'success' | 'error' | 'warning') {
   try {
-    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type);
+    sdkHapticNotify(type);
   } catch {
     // 忽略：非 Telegram 环境或不支持触感
   }
@@ -100,7 +104,7 @@ export default function ShopView() {
               ? (JSON.parse(raw) as {
                   success?: boolean;
                   error?: string;
-                  result?: { assets?: { balance?: number; stars?: number } };
+                  data?: { assets?: { balance?: number; stars?: number } };
                 })
               : {};
           } catch {
@@ -116,7 +120,7 @@ export default function ShopView() {
 
         // 购买成功后优先用接口回传的“可信资产快照”更新顶部资产（避免二次同步在弱网下延迟/失败）
         // SECURITY: assets 由服务端在校验 initData + DB 原子事务后返回，前端不参与计算
-        const assets = json?.result?.assets;
+        const assets = json?.data?.assets;
         if (assets && (typeof assets.balance !== 'undefined' || typeof assets.stars !== 'undefined')) {
           setAssetsFromServer({
             balance: Number(assets.balance ?? 0),
