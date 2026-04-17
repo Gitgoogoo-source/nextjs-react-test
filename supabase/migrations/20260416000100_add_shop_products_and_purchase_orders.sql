@@ -1,4 +1,4 @@
--- SECURITY: 商城商品与购买订单（服务端可信来源 + 幂等 + 原子事务）
+-- 商城商品与购买订单（服务端可信来源 + 幂等 + 原子事务）
 -- 设计目标：
 -- 1) 前端不可信：价格/币种/是否上架等必须以 DB 的 shop_products 为准
 -- 2) 幂等：同一 user_id + request_id 只能成功一次（断网/重试不重复扣款/发货）
@@ -80,7 +80,7 @@ BEFORE UPDATE ON purchase_orders
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 原子购买 RPC（由服务端使用 service role 调用）
--- SECURITY: 不接受前端传 price/currency，全部从 shop_products 读取并加锁
+-- 不接受前端传 price/currency，全部从 shop_products 读取并加锁
 CREATE OR REPLACE FUNCTION shop_purchase(
   p_user_id uuid,
   p_product_id uuid,

@@ -7,6 +7,8 @@
 
 列说明：`类型` 为 Postgres `data_type`；`格式` 为 Supabase 返回的 `format`；`属性` 含 nullable / unique / generated 等；`默认值/检查/备注` 来自数据库元数据。
 
+**相关文档**：[Supabase RPC / 函数参考（`public` + `graphql_public`）](./RPC_FUNCTIONS.md)
+
 **场景说明**：每张表标题下的「场景说明」为根据本仓库业务（Telegram Mini App 小游戏、开箱/商店/邀请等）与 Supabase 平台能力归纳的用途说明，便于读文档时对齐产品场景；**不是**数据库 `COMMENT` 字段的自动导出（若与线上实际用法不一致，以代码与 RPC 为准）。
 
 **未包含**：索引（INDEX）、唯一约束（除列级 `unique` 标记外）、触发器、视图/物化视图、RLS 策略正文；若需要可再用只读 SQL 从 `pg_catalog` / `information_schema` 导出。

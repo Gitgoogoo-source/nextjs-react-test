@@ -19,7 +19,7 @@ type CasePriceRow = Pick<
 >;
 
 // 宝箱类型的前端配置映射（静态属性：颜色、图标、描述等）
-// SECURITY: 不包含价格，价格必须从数据库 cases 表读取
+// 不包含价格，价格必须从数据库 cases 表读取
 const CHEST_TYPE_CONFIG: Record<string, {
   name: string;
   color: string;
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { initData } = listChestsSchema.parse(body);
 
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
       return jsonActionErr('身份验证失败', 401);
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       return jsonActionErr('服务器配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY', 500);
     }
 
-    // SECURITY: 限流（30 req/min 粒度）
+    // 限流（30 req/min 粒度）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'chest/list',
@@ -111,7 +111,7 @@ export async function POST(request: Request) {
       return jsonActionErr('数据库错误', 500);
     }
 
-    // 3. 从数据库 cases 表读取宝箱价格与 case_key（SECURITY: 确保价格与数据库一致）
+    // 3. 从数据库 cases 表读取宝箱价格与 case_key（确保价格与数据库一致）
     const typedUserChests = (userChests || []) as UserCaseInventoryRow[];
     const caseIds = typedUserChests.map((c) => c.case_id).filter(Boolean);
     const chestDetails: Record<string, { price: number; case_key: string | null }> = {};
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
         // 兼容 UI 映射：使用 cases.case_key（原 normal/rare/...）
         case_key: caseKey,
         quantity: chest.quantity,
-        // SECURITY: 价格来自数据库，而非客户端
+        // 价格来自数据库，而非客户端
         price: details.price,
         ...config,
       };

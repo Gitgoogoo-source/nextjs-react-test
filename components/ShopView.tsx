@@ -93,7 +93,7 @@ export default function ShopView() {
         const res = await fetch('/api/shop/purchase', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          // SECURITY: 只提交“动作”(购买某商品、数量、幂等 requestId) + initData；扣款/发货由服务端+DB 原子保证
+          // 只提交“动作”(购买某商品、数量、幂等 requestId) + initData；扣款/发货由服务端+DB 原子保证
           body: JSON.stringify({ productId, quantity: 1, requestId, initData }),
         });
 
@@ -119,7 +119,7 @@ export default function ShopView() {
         hapticNotify('success');
 
         // 购买成功后优先用接口回传的“可信资产快照”更新顶部资产（避免二次同步在弱网下延迟/失败）
-        // SECURITY: assets 由服务端在校验 initData + DB 原子事务后返回，前端不参与计算
+        // assets 由服务端在校验 initData + DB 原子事务后返回，前端不参与计算
         const assets = json?.data?.assets;
         if (assets && (typeof assets.balance !== 'undefined' || typeof assets.stars !== 'undefined')) {
           setAssetsFromServer({
@@ -133,7 +133,7 @@ export default function ShopView() {
         // 购买成功后静默刷新商品列表（避免有库存/上下架变化时 UI 不更新）
         void refreshSilent(initData);
         // 购买成功后静默刷新宝箱/藏品：商品可能发放宝箱或物品
-        // SECURITY: 仍只传 initData，服务端验签后返回可信数据
+        // 仍只传 initData，服务端验签后返回可信数据
         void useChestStore.getState().refreshSilent(initData);
         void useCollectionStore.getState().refreshSilent(initData);
       } catch (e: unknown) {

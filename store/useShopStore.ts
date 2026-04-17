@@ -37,7 +37,7 @@ async function fetchShopProducts(initData: string): Promise<ShopProduct[]> {
   const res = await fetch('/api/shop/products/list', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // SECURITY: 前端只传 initData；服务端会验签并从中提取可信 userId
+    // 前端只传 initData；服务端会验签并从中提取可信 userId
     body: JSON.stringify({ initData }),
   });
 
@@ -89,7 +89,7 @@ export const useShopStore = create<ShopState>((set, get) => ({
 
   refreshSilent: async (initData) => {
     if (!initData) return;
-    // SECURITY: 仍只传 initData；这里只是避免 loading UI
+    // 仍只传 initData；这里只是避免 loading UI
     try {
       const products = await fetchShopProducts(initData);
       set({ products, hasLoaded: true, loadedAt: Date.now() });

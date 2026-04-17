@@ -69,7 +69,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   syncSilent: async (initData) => {
-    // SECURITY: 仍然由服务端根据 initData 验签后返回资产；这里只是避免 UI 出现“同步中”提示
+    // 仍然由服务端根据 initData 验签后返回资产；这里只是避免 UI 出现“同步中”提示
     set({ error: null, initData });
     try {
       const response = await Promise.race([

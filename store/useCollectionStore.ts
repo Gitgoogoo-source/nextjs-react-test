@@ -31,7 +31,7 @@ async function fetchCollectionList(initData: string): Promise<CollectionListItem
   const res = await fetch('/api/collection/list', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // SECURITY: 只传 initData，服务端验签后取 userId，拒绝伪造
+    // 只传 initData，服务端验签后取 userId，拒绝伪造
     body: JSON.stringify({ initData }),
   });
 
@@ -80,7 +80,7 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
 
   refreshSilent: async (initData) => {
     if (!initData) return;
-    // SECURITY: 仍只传 initData，服务端验签后取 userId；这里只是避免 loading UI
+    // 仍只传 initData，服务端验签后取 userId；这里只是避免 loading UI
     try {
       const items = await fetchCollectionList(initData);
       set({ items, hasLoaded: true, loadedAt: Date.now() });

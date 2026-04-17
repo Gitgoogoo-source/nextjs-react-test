@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { chestId, requestId, initData } = openChestSchema.parse(body);
     
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
       return jsonActionErr('身份验证失败', 401);
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       return jsonActionErr('服务器配置错误', 500);
     }
 
-    // SECURITY: 限流（20 req/min 粒度）
+    // 限流（20 req/min 粒度）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'chest/open',
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       return rateLimitExceededResponse(rateLimitResult);
     }
 
-    // 1. 从数据库获取宝箱的实时价格与 case_key（SECURITY: 防止客户端篡改价格）
+    // 1. 从数据库获取宝箱的实时价格与 case_key（防止客户端篡改价格）
     const { data: chestInfo, error: chestInfoError } = await supabase
       .from('cases')
       .select('id, price, case_key')
@@ -83,13 +83,13 @@ export async function POST(request: Request) {
       return jsonActionErr('数据库中未找到该宝箱类型', 404);
     }
 
-    // SECURITY: 使用数据库中的价格，而不是前端传来的价格（RPC 侧期望 integer）
+    // 使用数据库中的价格，而不是前端传来的价格（RPC 侧期望 integer）
     const price = Number(chestInfo.price ?? 0);
     if (!Number.isSafeInteger(price) || price <= 0) {
       return jsonActionErr('宝箱价格无效', 400);
     }
 
-    // SECURITY: 掉率与奖池以 case_items 为准（后台可配置，避免硬编码与前端篡改）
+    // 掉率与奖池以 case_items 为准（后台可配置，避免硬编码与前端篡改）
     const { data: caseItems, error: caseItemsError } = await supabase
       .from('case_items')
       .select('item_id, drop_chance')
@@ -144,7 +144,7 @@ export async function POST(request: Request) {
     }
 
     // 使用安全的 RPC 函数执行数据库更新 (扣除宝箱、扣除余额、增加物品)
-    // SECURITY: 统一使用带 request_id 的签名（幂等/可审计）
+    // 统一使用带 request_id 的签名（幂等/可审计）
     const effectiveRequestId = requestId ?? crypto.randomUUID();
 
     type RpcResult =
@@ -184,7 +184,7 @@ export async function POST(request: Request) {
     // 若幂等命中，必须返回同一 item
     if (parsedRpc?.already_processed && parsedRpc?.item_id && parsedRpc.item_id !== itemUuid) {
       // 覆盖展示 item
-      // SECURITY: 以 DB 事件记录为准，避免重试时“换奖品”
+      // 以 DB 事件记录为准，避免重试时“换奖品”
     }
 
     // 从 DB 读取最终展示 item（幂等命中时使用 event 的 item_id）

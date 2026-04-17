@@ -44,8 +44,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
 
-    // SECURITY: 限流（此端点调用 Telegram Bot API，配额需保护）
-    // 5 req/min 粒度
+    // 限流（此端点调用 Telegram Bot API，配额需保护；5 req/min 粒度）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'friends/prepared-message',

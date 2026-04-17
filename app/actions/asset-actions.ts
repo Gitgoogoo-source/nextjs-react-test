@@ -16,11 +16,11 @@ const assetChangeSchema = z.object({
 
 /**
  * 同步用户资产 (登录时调用)
- * SECURITY: 验证 Telegram initData 确保身份真实性
  */
 export async function syncUserAssets(
   initData: string
 ): Promise<ActionResult<{ balance: number; stars: number }>> {
+  // 安全：已验证 Telegram initData 防止请求伪造
   const { isValid, user } = validateTelegramWebAppData(initData);
   if (!isValid || !user) {
     return { success: false, error: '身份验证失败' };
@@ -29,7 +29,7 @@ export async function syncUserAssets(
   const supabase = createAdminClient();
 
   // 新用户首次进入可能还没有 users 行；这里做幂等初始化，避免 PGRST116（0 行）导致“同步失败”
-  // SECURITY: 仅使用服务端验签后的 tg user.id 作为唯一身份，不信任客户端传 userId
+  // 仅使用服务端验签后的 tg user.id 作为唯一身份，不信任客户端传 userId
   const now = new Date().toISOString();
   const bootstrapUser: Database['public']['Tables']['users']['Insert'] = {
     telegram_id: user.id,
@@ -54,7 +54,7 @@ export async function syncUserAssets(
   }
 
   // 处理邀请（share 链接新用户进入时会带 start_param），不阻塞主同步流程
-  // SECURITY: start_param 不可信；inviter/invitee 身份以服务端验签后的 tg user.id 为准
+  // start_param 不可信；inviter/invitee 身份以服务端验签后的 tg user.id 为准
   try {
     const params = new URLSearchParams(initData);
     const startParam = params.get('start_param');
@@ -107,6 +107,7 @@ export async function processAssetChange(
   initData: string,
   params: AssetChangeParams
 ): Promise<ActionResult<{ newBalance: number | undefined }>> {
+  // 安全：已验证 Telegram initData 防止请求伪造
   const { isValid, user } = validateTelegramWebAppData(initData);
   if (!isValid || !user) {
     return { success: false, error: '身份验证失败' };
@@ -115,7 +116,7 @@ export async function processAssetChange(
   const validated = assetChangeSchema.parse(params);
   const supabase = createAdminClient();
 
-  // SECURITY: 调用服务端 RPC 函数，确保数据一致性
+  // 调用服务端 RPC 函数，确保数据一致性
   const { data, error } = await supabase.rpc('execute_asset_transaction', {
     p_telegram_id: user.id,
     p_resource_type: validated.type,

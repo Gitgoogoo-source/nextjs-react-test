@@ -32,7 +32,7 @@ async function fetchChestList(initData: string): Promise<ChestListItem[]> {
   const res = await fetch('/api/chest/list', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // SECURITY: 只传 initData，服务端验签后取 userId，拒绝伪造
+    // 只传 initData，服务端验签后取 userId，拒绝伪造
     body: JSON.stringify({ initData }),
   });
 
@@ -86,7 +86,7 @@ export const useChestStore = create<ChestState>((set, get) => ({
 
   refreshSilent: async (initData) => {
     if (!initData) return;
-    // SECURITY: 仍只传 initData，服务端验签后取 userId；这里只是避免 loading UI
+    // 仍只传 initData，服务端验签后取 userId；这里只是避免 loading UI
     try {
       const chests = await fetchChestList(initData);
       set({

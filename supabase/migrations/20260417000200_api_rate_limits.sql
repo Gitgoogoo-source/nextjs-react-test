@@ -1,4 +1,4 @@
--- SECURITY: API 层限流（防止刷接口耗尽数据库/Telegram Bot API 配额）
+-- API 层限流（防止刷接口耗尽数据库/Telegram Bot API 配额）
 -- 粒度：按 (scope, route) 切分窗口，scope 典型取 "tg:<telegram_id>" 或 "ip:<ip>"
 
 -- ========== 1) 限流计数表 ==========

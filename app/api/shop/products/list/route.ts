@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { initData } = listProductsSchema.parse(body);
 
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId（即使只是读接口也按公开端点处理）
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
       return jsonActionErr('身份验证失败', 401);
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
 
-    // SECURITY: 限流（30 req/min 粒度）
+    // 限流（30 req/min 粒度）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'shop/products/list',
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       return rateLimitExceededResponse(rateLimitResult);
     }
 
-    // SECURITY: 商品列表只来自 DB（shop_products），前端不允许硬编码商品/价格
+    // 商品列表只来自 DB（shop_products），前端不允许硬编码商品/价格
     const { data, error } = await supabase
       .from('shop_products')
       .select(

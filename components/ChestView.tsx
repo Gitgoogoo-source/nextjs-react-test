@@ -10,7 +10,7 @@ import { useUserStore } from '@/store/useUserStore';
 import { useChestStore, type ChestListItem } from '@/store/useChestStore';
 import { useCollectionStore } from '@/store/useCollectionStore';
 
-// SECURITY: 前端不再硬编码价格，价格从数据库通过 API 获取
+// 前端不再硬编码价格，价格从数据库通过 API 获取
 // 此配置仅包含静态 UI 属性（颜色、图标等）
 const CHEST_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   normal: Package,
@@ -213,7 +213,7 @@ export default function ChestView() {
     setCurrentIndex((prev) => (prev - 1 + userChests.length) % userChests.length);
   };
 
-  // SECURITY: 当前选中的宝箱，价格来自后端 API
+  // 当前选中的宝箱，价格来自后端 API
   const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
 
   const startOpen = async () => {
@@ -246,11 +246,11 @@ export default function ChestView() {
 
       const requestId = uuidv4();
 
-      // SECURITY: 点击后立刻向服务端提交开箱申请（前端不做结算/不传结果）
+      // 点击后立刻向服务端提交开箱申请（前端不做结算/不传结果）
       const response = await fetch('/api/chest/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // SECURITY: 只传递宝箱 UUID（cases.id），后端会从数据库读取价格与类型进行验证
+        // 只传递宝箱 UUID（cases.id），后端会从数据库读取价格与类型进行验证
         body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData })
       });
       
@@ -271,14 +271,14 @@ export default function ChestView() {
       const { wonItem: wonItemFromServer, randomOffset, userAssets } = body.data;
 
       // 关键修复：开箱成功后，立即用服务端回传的最新资产刷新顶部 UI
-      // SECURITY: 资产只接受服务端回传（DB 真实值），前端不做任何结算
+      // 资产只接受服务端回传（DB 真实值），前端不做任何结算
       if (userAssets) setAssetsFromServer(userAssets);
 
       // 静默同步最新资产/宝箱数量：在开箱动画期间后台完成，避免回主界面出现“同步数据中/加载宝箱中”
-      // SECURITY: 仍然只通过 initData 让服务端验签后返回可信数据
+      // 仍然只通过 initData 让服务端验签后返回可信数据
       void useChestStore.getState().refreshSilent(initData);
       // 开箱成功后静默刷新藏品列表（只在此处与登录处刷新，切换页面不重复请求）
-      // SECURITY: 只传 initData，服务端验签后读取 user_items/ items 返回可信数据
+      // 只传 initData，服务端验签后读取 user_items/ items 返回可信数据
       void useCollectionStore.getState().refreshSilent(initData);
       void useUserStore.getState().syncSilent(initData);
       

@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { initData } = listCollectionSchema.parse(body);
 
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
       return jsonActionErr('身份验证失败', 401);
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       return jsonActionErr('服务器配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY', 500);
     }
 
-    // SECURITY: 限流（30 req/min 粒度）
+    // 限流（30 req/min 粒度）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'collection/list',

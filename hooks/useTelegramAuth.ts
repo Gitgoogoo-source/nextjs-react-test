@@ -37,7 +37,7 @@ export function useTelegramAuth() {
           if (typeof launchParamsInitDataRaw === 'string') initData = launchParamsInitDataRaw;
           else if (launchParamsInitDataRaw != null) initData = String(launchParamsInitDataRaw);
           // UI 用用户信息（不用于鉴权）
-          // SECURITY: 前端拿到的 user 仅用于展示；所有敏感操作仍需服务端校验 initData 防止伪造
+          // 前端拿到的 user 仅用于展示；所有敏感操作仍需服务端校验 initData 防止伪造
           if (lp?.initData?.user) {
             parsedUser = lp.initData.user as TelegramUser;
           }
@@ -46,7 +46,7 @@ export function useTelegramAuth() {
         }
 
         // 兜底：即使 retrieveLaunchParams 成功但 initDataRaw 为空，再从 SDK 支持的来源取一次
-        // SECURITY: initData 仅作为服务端验签输入，服务端会校验签名防止伪造
+        // initData 仅作为服务端验签输入，服务端会校验签名防止伪造
         if (!initData) {
           try {
             const raw = retrieveRawInitData();
@@ -85,7 +85,7 @@ export function useTelegramAuth() {
         }
 
         // 从 initData 中解析 user（用于 UI 展示）
-        // SECURITY: 解析出来的 user 只做 UI，不作为身份凭据；身份以服务端 validateTelegramWebAppData 为准
+        // 解析出来的 user 只做 UI，不作为身份凭据；身份以服务端 validateTelegramWebAppData 为准
         if (!parsedUser) {
           try {
             const params = new URLSearchParams(initData);
@@ -103,11 +103,11 @@ export function useTelegramAuth() {
         await syncStore(initData);
 
         // 登录成功后，只执行一次“从后端获取用户宝箱数据”
-        // SECURITY: 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
+        // 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
         await useChestStore.getState().loadOnce(initData);
 
         // 登录成功后，只执行一次“从后端获取用户藏品数据”
-        // SECURITY: 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
+        // 仅使用 initData 作为服务端验签输入，避免前端伪造 userId
         await useCollectionStore.getState().loadOnce(initData);
         
       } catch (err: unknown) {

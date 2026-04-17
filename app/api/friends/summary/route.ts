@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
 
-    // SECURITY: 限流（30 req/min 粒度）
+    // 限流（30 req/min 粒度）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'friends/summary',

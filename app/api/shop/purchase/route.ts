@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { validateTelegramWebAppData } from '@/lib/telegram';
 import { checkRateLimit, rateLimitExceededResponse, telegramScope } from '@/lib/rate-limit';
 
-// SECURITY: 购买会改变资产/库存，必须禁用 Next.js 缓存，确保每次请求都走真实后端逻辑
+// 购买会改变资产/库存，必须禁用 Next.js 缓存，确保每次请求都走真实后端逻辑
 export const dynamic = 'force-dynamic';
 
 const purchaseSchema = z.object({
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { productId, quantity, requestId, initData } = purchaseSchema.parse(body);
 
-    // SECURITY: 服务端校验 Telegram initData，拒绝伪造 userId
+    // 安全：已验证 Telegram initData 防止请求伪造
     const { isValid, user: tgUser } = validateTelegramWebAppData(initData);
     if (!isValid || !tgUser) {
       return jsonActionErr('身份验证失败，请在 Telegram 内重新打开小游戏', 401);
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
 
-    // SECURITY: 限流（20 req/min 粒度，保护 shop_purchase RPC 与 DB）
+    // 限流（20 req/min 粒度，保护 shop_purchase RPC 与 DB）
     const rateLimitResult = await checkRateLimit(supabase, {
       scope: telegramScope(tgUser.id),
       route: 'shop/purchase',
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       return rateLimitExceededResponse(rateLimitResult);
     }
 
-    // SECURITY: 服务器端把 telegram_id 映射到内部 users.id（不信任前端传 userId）
+    // 服务器端把 telegram_id 映射到内部 users.id（不信任前端传 userId）
     const { data: dbUser, error: userError } = await supabase
       .from('users')
       .select('id')
@@ -54,8 +54,8 @@ export async function POST(request: Request) {
 
     const effectiveRequestId = requestId ?? crypto.randomUUID();
 
-    // SECURITY: 购买的价格/币种/上下架状态全部由 DB 内 shop_products 决定
-    // SECURITY: 原子性/一致性/幂等由 DB 函数 shop_purchase 保证（行级锁 + UNIQUE(user_id, request_id)）
+    // 购买的价格/币种/上下架状态全部由 DB 内 shop_products 决定
+    // 原子性/一致性/幂等由 DB 函数 shop_purchase 保证（行级锁 + UNIQUE(user_id, request_id)）
     const { data: rpcData, error: rpcError } = await supabase.rpc('shop_purchase', {
       p_user_id: dbUser.id,
       p_product_id: productId,
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       return jsonActionErr('服务器内部错误', 500);
     }
 
-    // SECURITY: rpcData 是 DB 函数返回的 json；需要把“幂等已处理/失败”等结果显式转换，避免前端静默成功
+    // rpcData 是 DB 函数返回的 json；需要把“幂等已处理/失败”等结果显式转换，避免前端静默成功
     const payload = rpcData as unknown as {
       success?: boolean;
       already_processed?: boolean;
