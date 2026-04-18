@@ -5,7 +5,9 @@ import { motion, useTransform, useMotionTemplate, type MotionValue } from 'frame
 import { Package } from 'lucide-react';
 import { ArrowLeft } from 'lucide-react';
 import { ResultModal } from './ResultModal';
+import { MultiResultModal } from './MultiResultModal';
 import type { PrizeViewItem } from '@/hooks/useOpenChest';
+import type { OpenMode } from '@/hooks/useOpenChest';
 
 interface RouletteItemProps {
   item: PrizeViewItem;
@@ -40,9 +42,11 @@ function RouletteItem({ item, idx, x, itemWidth }: RouletteItemProps) {
 }
 
 interface RoulettePanelProps {
+  mode: OpenMode;
   isSpinning: boolean;
   showResult: boolean;
   wonItem: PrizeViewItem | null;
+  wonItems: PrizeViewItem[];
   rouletteItems: PrizeViewItem[];
   targetX: number;
   x: MotionValue<number>;
@@ -52,7 +56,7 @@ interface RoulettePanelProps {
 }
 
 export function RoulettePanel({
-  isSpinning, showResult, wonItem, rouletteItems,
+  mode, isSpinning, showResult, wonItem, wonItems, rouletteItems,
   targetX, x, containerRef, onSpinComplete, onClose,
 }: RoulettePanelProps) {
   // 避免从「开启宝箱」抬手瞬间误触刚出现的「返回」
@@ -61,6 +65,9 @@ export function RoulettePanel({
     const t = window.setTimeout(() => setBackReady(true), 350);
     return () => clearTimeout(t);
   }, []);
+
+  // batch 模式：2.5s 快速轮盘；single 模式：7s 原速
+  const spinDuration = mode === 'batch' ? 2.5 : 7;
 
   return (
     <div className="fixed inset-0 w-screen h-screen flex flex-col items-center justify-center bg-background overflow-hidden z-50">
@@ -81,6 +88,13 @@ export function RoulettePanel({
         </button>
       )}
 
+      {/* batch 模式标识 */}
+      {mode === 'batch' && (
+        <div className="absolute top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)] right-4 z-20 text-xs font-bold text-zinc-400 tracking-widest uppercase">
+          十连开
+        </div>
+      )}
+
       <div className="relative w-full max-w-md mx-auto z-10" ref={containerRef}>
         {/* 红色指针 */}
         <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-red-500 -translate-x-1/2 z-20 shadow-[0_0_15px_rgba(239,68,68,1)]" />
@@ -99,7 +113,7 @@ export function RoulettePanel({
             style={{ x }}
             initial={{ x: 0 }}
             animate={{ x: isSpinning ? targetX : 0 }}
-            transition={{ duration: 7, ease: [0.13, 0.99, 0.22, 1], onComplete: onSpinComplete }}
+            transition={{ duration: spinDuration, ease: [0.13, 0.99, 0.22, 1], onComplete: onSpinComplete }}
           >
             {rouletteItems.map((item, idx) => (
               <RouletteItem key={idx} item={item} idx={idx} x={x} itemWidth={100} />
@@ -108,7 +122,12 @@ export function RoulettePanel({
         </div>
       </div>
 
-      <ResultModal showResult={showResult} wonItem={wonItem} onClose={onClose} />
+      {/* 单开用原有弹窗，十连用网格弹窗 */}
+      {mode === 'single' ? (
+        <ResultModal showResult={showResult} wonItem={wonItem} onClose={onClose} />
+      ) : (
+        <MultiResultModal showResult={showResult} wonItems={wonItems} onClose={onClose} />
+      )}
     </div>
   );
 }

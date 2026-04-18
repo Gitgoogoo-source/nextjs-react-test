@@ -6,7 +6,7 @@ import { Package } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
 import { useChestStore } from '@/store/useChestStore';
-import { useOpenChest, CHEST_ICON_MAP, type UserChestInstance } from '@/hooks/useOpenChest';
+import { useOpenChest, CHEST_ICON_MAP, type UserChestInstance, type OpenMode } from '@/hooks/useOpenChest';
 import { RoulettePanel } from './chest/RoulettePanel';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
@@ -28,16 +28,20 @@ export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
+  const userBalance = useUserStore((s) => s.balance);
   const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce } = useChestStore();
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
+  const [activeMode, setActiveMode] = useState<OpenMode>('single');
 
   const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
   const {
     isOpening,
     isOpeningPending,
+    openMode,
     isSpinning,
     showResult,
     wonItem,
+    wonItems,
     rouletteItems,
     targetX,
     x,
@@ -60,7 +64,7 @@ export default function ChestView() {
         for (let i = 0; i < chest.quantity; i++) {
           instances.push({
             ...chest,
-            quantity: 1,
+            quantity: chest.quantity,
             uniqueId: `${chest.case_id}-${i}`,
             icon: CHEST_ICON_MAP[chest.case_key] || Package,
           });
@@ -81,12 +85,24 @@ export default function ChestView() {
     setCurrentIndex((prev) => (prev - 1 + userChests.length) % userChests.length);
   };
 
+  // 当前宝箱实际数量（从 chests store 取聚合数量）
+  const currentChestQuantity = currentChest
+    ? (chests.find((c) => c.case_id === currentChest.case_id)?.quantity ?? 0)
+    : 0;
+  const price = currentChest?.price ?? 0;
+  const bal = Number(userBalance ?? 0);
+
+  const canSingle = currentChestQuantity >= 1 && bal >= price;
+  const canBatch = currentChestQuantity >= 10 && bal >= price * 10;
+
   if (isOpening) {
     return (
       <RoulettePanel
+        mode={openMode}
         isSpinning={isSpinning}
         showResult={showResult}
         wonItem={wonItem}
+        wonItems={wonItems}
         rouletteItems={rouletteItems}
         targetX={targetX}
         x={x}
@@ -135,9 +151,30 @@ export default function ChestView() {
     <div className="absolute inset-0 flex flex-col items-center justify-between px-4 py-6 overflow-hidden">
       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`} />
 
-      <div className="text-center z-10 shrink-0 mt-2">
-        <h2 className="text-2xl font-bold text-white mb-1">选择宝箱</h2>
-        <p className="text-gray-400 text-sm">滑动或点击切换不同类型的宝箱</p>
+      {/* 顶部：标题 + 单开/十连 段控 */}
+      <div className="flex items-start justify-between w-full z-10 shrink-0 mt-2">
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-1">当前宝箱</h2>
+        </div>
+
+        {/* 段控：单开 / 十连 */}
+        <div className="flex items-center gap-1 bg-white/10 rounded-full p-1 border border-white/15 backdrop-blur-sm">
+          {(['single', 'batch'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setActiveMode(m)}
+              disabled={isOpening || isOpeningPending}
+              className={`px-3 py-1 rounded-full text-sm font-semibold transition-all duration-200 ${
+                activeMode === m
+                  ? 'bg-white text-zinc-900 shadow-sm'
+                  : 'text-zinc-400 hover:text-white'
+              } disabled:opacity-40`}
+            >
+              {m === 'single' ? '单开' : '十连'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {actionError ? (
@@ -195,7 +232,14 @@ export default function ChestView() {
                   <ChestIcon className="w-10 h-10 text-white" />
                 </div>
                 <h3 className="text-xl font-bold text-white mb-1">{chest.name}</h3>
-                <p className="text-xs text-gray-300 text-center">{chest.description}</p>
+                <p className="text-xs text-gray-300 text-center">
+                  {chest.description}
+                </p>
+                {isCenter && (
+                  <p className="text-xs text-zinc-400 mt-1">
+                    剩余次数 {currentChestQuantity}/10
+                  </p>
+                )}
               </motion.button>
             );
           })}
@@ -209,32 +253,51 @@ export default function ChestView() {
         )}
       </div>
 
-      {/* 底部价格与开箱按钮 */}
-      <div className="flex flex-col items-center gap-3 z-10 w-full max-w-[280px] shrink-0 mb-4">
-        <div className="relative h-11 w-full flex items-center justify-center">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={currentChest?.case_id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1, transition: { duration: 0.18 } }}
-              exit={{ opacity: 0, transition: { duration: 0.12 } }}
-              className="absolute inset-0 flex items-center justify-center"
-            >
-              <div className="flex items-center gap-2 text-lg font-bold text-white bg-black/30 px-6 py-2 rounded-full border border-white/10">
-                <span>开启需要:</span>
-                <span className="text-green-400">{currentChest?.price} 叶子</span>
-              </div>
-            </motion.div>
-          </AnimatePresence>
-        </div>
+      {/* 底部：价格信息 + 双按钮（单开 / 十连开） */}
+      <div className="flex flex-col items-center gap-3 z-10 w-full max-w-[320px] shrink-0 mb-4">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={`${currentChest?.case_id}-${activeMode}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, transition: { duration: 0.18 } }}
+            exit={{ opacity: 0, transition: { duration: 0.12 } }}
+            className="flex items-center gap-2 text-sm font-medium text-zinc-400"
+          >
+            {activeMode === 'single' ? (
+              <span>单次消耗 <span className="text-green-400 font-bold">{price}</span> 叶子</span>
+            ) : (
+              <span>十连消耗 <span className="text-green-400 font-bold">{price * 10}</span> 叶子</span>
+            )}
+          </motion.div>
+        </AnimatePresence>
 
-        <button
-          onClick={startOpen}
-          disabled={isOpening || isOpeningPending}
-          className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest?.color || ''} hover:opacity-90 transition-opacity shadow-lg ${currentChest?.shadow || ''} disabled:opacity-50 disabled:cursor-not-allowed`}
-        >
-          {isOpeningPending ? '开启中...' : '开启宝箱'}
-        </button>
+        <div className="flex gap-3 w-full">
+          {/* 单开按钮（浅色） */}
+          <button
+            onClick={() => startOpen('single')}
+            disabled={isOpening || isOpeningPending || !canSingle}
+            className="flex-1 py-4 rounded-xl font-bold text-base text-zinc-900 bg-[#f5f0e8] hover:bg-[#ede5d5] transition-colors shadow disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            <span>单开</span>
+            <span className="text-sm">🔑{price}</span>
+          </button>
+
+          {/* 十连开按钮（深色） */}
+          <button
+            onClick={() => startOpen('batch')}
+            disabled={isOpening || isOpeningPending || !canBatch}
+            className={`flex-1 py-4 rounded-xl font-bold text-base text-white transition-colors shadow disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 bg-gradient-to-r ${currentChest?.color || 'from-zinc-700 to-zinc-900'} hover:opacity-90`}
+          >
+            {isOpeningPending ? (
+              <span className="animate-pulse">开启中...</span>
+            ) : (
+              <>
+                <span>十连开</span>
+                <span className="bg-white/20 rounded-full px-2 py-0.5 text-xs font-bold">🔑{price * 10}</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

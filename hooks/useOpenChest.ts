@@ -41,6 +41,27 @@ export interface UserChestInstance extends ChestListItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
+// 稀有度排序权重（越高越稀有，优先展示）
+const RARITY_WEIGHT: Record<string, number> = {
+  'Rare Special': 5,
+  'Covert': 4,
+  'Classified': 3,
+  'Restricted': 2,
+  'Mil-Spec': 1,
+};
+
+function rarityWeight(rarity: string) {
+  return RARITY_WEIGHT[rarity] ?? 0;
+}
+
+/** 找出稀有度最高的物品（轮盘焦点与撒花依据） */
+export function findHighestRarityItem(items: PrizeViewItem[]): PrizeViewItem | null {
+  if (items.length === 0) return null;
+  return items.reduce((best, cur) =>
+    rarityWeight(cur.rarity) > rarityWeight(best.rarity) ? cur : best
+  );
+}
+
 function playTickSound() {
   try {
     const w = window as unknown as { webkitAudioContext?: typeof AudioContext } & Window;
@@ -83,9 +104,11 @@ function generateUUID(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function buildRouletteItems(winner: PrizeViewItem): PrizeViewItem[] {
-  return Array.from({ length: 50 }, (_, i) => {
-    if (i === 44) return winner;
+function buildRouletteItems(winner: PrizeViewItem, fast = false): PrizeViewItem[] {
+  const count = fast ? 30 : 50;
+  const targetIdx = fast ? 24 : 44;
+  return Array.from({ length: count }, (_, i) => {
+    if (i === targetIdx) return winner;
     const rand = Math.random() * 100;
     if (rand < 50) return MOCK_PRIZES[0];
     if (rand < 75) return MOCK_PRIZES[1];
@@ -95,23 +118,30 @@ function buildRouletteItems(winner: PrizeViewItem): PrizeViewItem[] {
   });
 }
 
+export const SINGLE_ROULETTE_TARGET_IDX = 44;
+export const BATCH_ROULETTE_TARGET_IDX = 24;
+
+export type OpenMode = 'single' | 'batch';
+
 export function useOpenChest(currentChest: UserChestInstance | null) {
   const initData = useUserStore((s) => s.initData);
   const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
 
-  /** 全屏轮盘阶段（已有开奖结果，展示动画） */
   const [isOpening, setIsOpening] = useState(false);
-  /** 请求 /api/chest/open 期间：留在宝箱页，避免先切全屏再失败导致黑屏闪退 */
   const [isOpeningPending, setIsOpeningPending] = useState(false);
+  const [openMode, setOpenMode] = useState<OpenMode>('single');
   const [rouletteItems, setRouletteItems] = useState<PrizeViewItem[]>([]);
   const [isSpinning, setIsSpinning] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [wonItem, setWonItem] = useState<PrizeViewItem | null>(null);
+  const [wonItems, setWonItems] = useState<PrizeViewItem[]>([]);
   const [targetX, setTargetX] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   const lastTickIndex = useRef(-1);
+  // 保存本批 requestIds，重试时复用以保证幂等
+  const batchRequestIdsRef = useRef<string[] | null>(null);
 
   useMotionValueEvent(x, 'change', (latest) => {
     if (!isSpinning) return;
@@ -129,26 +159,32 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
     setShowResult(false);
     setIsSpinning(false);
     setRouletteItems([]);
+    setWonItems([]);
     setActionError(null);
     x.set(0);
     lastTickIndex.current = -1;
+    batchRequestIdsRef.current = null;
   };
 
   const handleSpinComplete = () => {
     setShowResult(true);
     try { telegramHapticNotify('success'); } catch (e) { console.error('Haptic notify failed', e); }
-    if (!wonItem) return;
+    const highlight = openMode === 'batch' ? findHighestRarityItem(wonItems) : wonItem;
+    if (!highlight) return;
+    // 仅稀有物品触发撒花，避免普通物品 10 次叠加掉帧
+    const isRare = ['Classified', 'Covert', 'Rare Special'].includes(highlight.rarity);
+    if (!isRare && openMode === 'batch') return;
     const end = Date.now() + 3000;
     const frame = () => {
-      confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0, y: 0.8 }, colors: [wonItem.hex, '#ffffff'] });
-      confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1, y: 0.8 }, colors: [wonItem.hex, '#ffffff'] });
+      confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0, y: 0.8 }, colors: [highlight.hex, '#ffffff'] });
+      confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1, y: 0.8 }, colors: [highlight.hex, '#ffffff'] });
       if (Date.now() < end) requestAnimationFrame(frame);
     };
-    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: [wonItem.hex, '#ffffff', '#facc15'] });
+    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: [highlight.hex, '#ffffff', '#facc15'] });
     frame();
   };
 
-  const startOpen = async () => {
+  const startOpen = async (mode: OpenMode = 'single') => {
     if (isOpening || isOpeningPending || !currentChest) return;
     setActionError(null);
     if (!initData) {
@@ -157,6 +193,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
       return;
     }
 
+    setOpenMode(mode);
     setIsOpeningPending(true);
     setShowResult(false);
     setIsSpinning(false);
@@ -164,47 +201,105 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
     lastTickIndex.current = -1;
 
     try {
-      const requestId = generateUUID();
-      const response = await fetch('/api/chest/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData }),
-      });
-
-      let body: {
-        success?: boolean;
-        error?: string;
-        data?: { wonItem: PrizeViewItem; randomOffset: number; userAssets?: { balance: number; stars: number } };
-      };
-      try {
-        body = (await response.json()) as typeof body;
-      } catch {
-        throw new Error('服务器响应无效，请稍后重试');
-      }
-
-      if (!response.ok || !body.success || !body.data) throw new Error(body.error || '开启宝箱失败');
-
-      const { wonItem: serverWonItem, randomOffset, userAssets } = body.data;
-      if (userAssets) setAssetsFromServer(userAssets);
-
-      void useChestStore.getState().refreshSilent(initData);
-      void useCollectionStore.getState().refreshSilent(initData);
-      void useUserStore.getState().syncSilent(initData);
-
-      const items = buildRouletteItems(serverWonItem);
-      setRouletteItems(items);
-      setWonItem(items[44]);
-
-      setIsOpeningPending(false);
-      setIsOpening(true);
-
-      // 轮盘 ref 仅用于布局，动画不依赖测量；双 rAF 确保全屏层已挂载后再开转，避免偶发跳过转动
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setTargetX(-(44 * 100 + 50) + randomOffset);
-          setIsSpinning(true);
+      if (mode === 'single') {
+        const requestId = generateUUID();
+        const response = await fetch('/api/chest/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData }),
         });
-      });
+
+        let body: {
+          success?: boolean;
+          error?: string;
+          data?: { wonItem: PrizeViewItem; randomOffset: number; userAssets?: { balance: number; stars: number } };
+        };
+        try {
+          body = (await response.json()) as typeof body;
+        } catch {
+          throw new Error('服务器响应无效，请稍后重试');
+        }
+
+        if (!response.ok || !body.success || !body.data) throw new Error(body.error || '开启宝箱失败');
+
+        const { wonItem: serverWonItem, randomOffset, userAssets } = body.data;
+        if (userAssets) setAssetsFromServer(userAssets);
+
+        void useChestStore.getState().refreshSilent(initData);
+        void useCollectionStore.getState().refreshSilent(initData);
+        void useUserStore.getState().syncSilent(initData);
+
+        const items = buildRouletteItems(serverWonItem, false);
+        setRouletteItems(items);
+        setWonItem(items[SINGLE_ROULETTE_TARGET_IDX]);
+        setWonItems([]);
+
+        setIsOpeningPending(false);
+        setIsOpening(true);
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setTargetX(-(SINGLE_ROULETTE_TARGET_IDX * 100 + 50) + randomOffset);
+            setIsSpinning(true);
+          });
+        });
+      } else {
+        // 批量开箱：复用已有的 requestIds（重试幂等）
+        if (!batchRequestIdsRef.current) {
+          batchRequestIdsRef.current = Array.from({ length: 10 }, () => generateUUID());
+        }
+        const requestIds = batchRequestIdsRef.current;
+
+        const response = await fetch('/api/chest/open-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chestId: currentChest.case_id, requestIds, initData }),
+        });
+
+        let body: {
+          success?: boolean;
+          error?: string;
+          data?: {
+            wonItems: PrizeViewItem[];
+            randomOffset: number;
+            userAssets?: { balance: number; stars: number };
+          };
+        };
+        try {
+          body = (await response.json()) as typeof body;
+        } catch {
+          throw new Error('服务器响应无效，请稍后重试');
+        }
+
+        if (!response.ok || !body.success || !body.data) throw new Error(body.error || '十连开箱失败');
+
+        const { wonItems: serverWonItems, randomOffset, userAssets } = body.data;
+        if (userAssets) setAssetsFromServer(userAssets);
+
+        // 成功后清空 requestIds，允许下次生成新的
+        batchRequestIdsRef.current = null;
+
+        void useChestStore.getState().refreshSilent(initData);
+        void useCollectionStore.getState().refreshSilent(initData);
+        void useUserStore.getState().syncSilent(initData);
+
+        // 轮盘焦点用最高稀有度物品
+        const highlight = findHighestRarityItem(serverWonItems) ?? serverWonItems[0];
+        const items = buildRouletteItems(highlight, true);
+        setRouletteItems(items);
+        setWonItem(items[BATCH_ROULETTE_TARGET_IDX]);
+        setWonItems(serverWonItems);
+
+        setIsOpeningPending(false);
+        setIsOpening(true);
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setTargetX(-(BATCH_ROULETTE_TARGET_IDX * 100 + 50) + randomOffset);
+            setIsSpinning(true);
+          });
+        });
+      }
     } catch (error: unknown) {
       console.error('Error:', error);
       setIsOpening(false);
@@ -218,9 +313,11 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
   return {
     isOpening,
     isOpeningPending,
+    openMode,
     isSpinning,
     showResult,
     wonItem,
+    wonItems,
     rouletteItems,
     targetX,
     x,

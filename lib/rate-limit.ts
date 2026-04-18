@@ -11,6 +11,8 @@ export interface RateLimitOptions {
   route: string;
   limit: number;
   windowSeconds: number;
+  /** 每次请求累加的计数，默认 1；批量接口按实际次数传入 */
+  delta?: number;
 }
 
 export interface RateLimitResult {
@@ -30,6 +32,7 @@ export async function checkRateLimit(
     p_route: opts.route,
     p_limit: opts.limit,
     p_window_seconds: opts.windowSeconds,
+    ...(opts.delta !== undefined && opts.delta !== 1 ? { p_delta: opts.delta } : {}),
   });
 
   if (error) {

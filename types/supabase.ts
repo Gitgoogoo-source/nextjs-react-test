@@ -713,6 +713,18 @@ export type Database = {
           p_route: string
           p_scope: string
           p_window_seconds: number
+          p_delta?: number
+        }
+        Returns: Json
+      }
+      open_chest_batch_secure: {
+        Args: {
+          p_user_id: string
+          p_chest_id: string
+          p_price: number
+          p_item_ids: string[]
+          p_request_ids: string[]
+          p_times: number
         }
         Returns: Json
       }

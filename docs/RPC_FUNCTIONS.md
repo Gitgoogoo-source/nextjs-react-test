@@ -6,7 +6,7 @@
 |------|------|
 | **数据来源** | Supabase MCP `execute_sql`：`pg_proc`、`pg_get_function_identity_arguments`、`pg_get_functiondef` |
 | **远程项目** | `reactTest`（`project_id`: `tfgzxvabdlnkpbikgcjv`） |
-| **同步时间** | 2026-04-19（`open_chest_secure` 等与迁移 `20260419000000_open_chest_secure_resolve_pgrest_overload` / 远程 `pg_get_functiondef` 对齐） |
+| **同步时间** | 2026-04-18（`pg_get_functiondef` 与 Supabase MCP `list_tables` / `execute_sql` 只读核对；含 `open_chest_batch_secure`、`check_and_increment_rate_limit(..., p_delta)`） |
 | **说明** | 部署或 migration 变更后，远程定义可能与本文档不一致；请以数据库为准或重新拉取 `pg_get_functiondef`。 |
 
 ---
@@ -26,6 +26,27 @@ await supabase.rpc('open_chest_secure', {
   p_price: 100,
   p_item_id: '...',
   p_request_id: '...',
+});
+```
+
+批量开箱（数组长度与 `p_times` 一致；`p_delta` 可省略，默认为 `1`）：
+
+```ts
+await supabase.rpc('open_chest_batch_secure', {
+  p_user_id: '...',
+  p_chest_id: '...',
+  p_price: 100,
+  p_item_ids: [/* uuid[], len = p_times */],
+  p_request_ids: [/* uuid[], len = p_times */],
+  p_times: 3,
+});
+
+await supabase.rpc('check_and_increment_rate_limit', {
+  p_scope: 'ip:1.2.3.4',
+  p_route: '/api/chest/open-batch',
+  p_limit: 60,
+  p_window_seconds: 60,
+  p_delta: 1,
 });
 ```
 
@@ -228,18 +249,19 @@ $function$
 
 | 属性 | 值 |
 |------|-----|
-| **身份参数** | `p_scope text, p_route text, p_limit integer, p_window_seconds integer` |
+| **身份参数** | `p_scope text, p_route text, p_limit integer, p_window_seconds integer, p_delta integer` |
+| **默认参数** | `p_delta` 默认 `1` |
 | **返回类型** | `jsonb` |
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | **`true`** |
 | **search_path** | `SET search_path TO 'public'` |
-| **行为摘要** | 时间窗口对齐到整秒切片；对 `api_rate_limits` 做 `INSERT ... ON CONFLICT` 累加计数；`p_limit <= 0` 或 `p_window_seconds <= 0` 时 `RAISE EXCEPTION`。 |
+| **行为摘要** | 时间窗口对齐到整秒切片；对 `api_rate_limits` 做 `INSERT ... ON CONFLICT` 按 `p_delta` 累加计数；`p_limit <= 0`、`p_window_seconds <= 0` 或 `p_delta <= 0` 时 `RAISE EXCEPTION`。 |
 
 **源定义：**
 
 ```sql
-CREATE OR REPLACE FUNCTION public.check_and_increment_rate_limit(p_scope text, p_route text, p_limit integer, p_window_seconds integer)
+CREATE OR REPLACE FUNCTION public.check_and_increment_rate_limit(p_scope text, p_route text, p_limit integer, p_window_seconds integer, p_delta integer DEFAULT 1)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -254,18 +276,20 @@ BEGIN
   IF p_limit <= 0 OR p_window_seconds <= 0 THEN
     RAISE EXCEPTION 'rate_limit: invalid limit/window';
   END IF;
+  IF p_delta <= 0 THEN
+    RAISE EXCEPTION 'rate_limit: invalid delta';
+  END IF;
 
-  -- 对齐到窗口起点（整秒切片）
   v_window_start := to_timestamp(
     (floor(extract(epoch FROM v_now) / p_window_seconds) * p_window_seconds)::bigint
   );
   v_reset_at := v_window_start + make_interval(secs => p_window_seconds);
 
   INSERT INTO public.api_rate_limits AS r (scope, route, window_start, count, updated_at)
-  VALUES (p_scope, p_route, v_window_start, 1, v_now)
+  VALUES (p_scope, p_route, v_window_start, p_delta, v_now)
   ON CONFLICT (scope, route, window_start)
   DO UPDATE SET
-    count = r.count + 1,
+    count = r.count + p_delta,
     updated_at = v_now
   RETURNING count INTO v_count;
 
@@ -504,7 +528,180 @@ $function$
 
 ---
 
-### 3.6 `shop_purchase`
+### 3.6 `open_chest_batch_secure`
+
+| 属性 | 值 |
+|------|-----|
+| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price integer, p_item_ids uuid[], p_request_ids uuid[], p_times integer` |
+| **返回类型** | `json` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | `false` |
+| **行为摘要** | 单事务内连续开箱 `p_times` 次（1–10）：`p_item_ids` / `p_request_ids` 长度须与 `p_times` 一致；按 `chest_open_events (user_id, request_id)` 幂等抢占，与 `open_chest_secure` 相同事件表；已存在的 `request_id` 跳过扣费并合并历史 `item_id` 到 `items` 数组；否则扣 `p_price`、减箱、发放对应 `user_items` 并写事件快照。失败时 `RAISE EXCEPTION`（余额不足、箱数不足、参数非法等）。 |
+
+> 迁移：`supabase/migrations/20260418103000_add_open_chest_batch_secure.sql`。
+
+**源定义**（与远程 `pg_get_functiondef` 一致）：
+
+```sql
+CREATE OR REPLACE FUNCTION public.open_chest_batch_secure(p_user_id uuid, p_chest_id uuid, p_price integer, p_item_ids uuid[], p_request_ids uuid[], p_times integer)
+ RETURNS json
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_user_balance integer;
+  v_user_stars integer;
+  v_case_quantity integer;
+  v_pending_count integer;
+  v_balance_after integer;
+  v_stars_after integer;
+  v_case_quantity_after integer;
+  v_claimed_id uuid;
+  v_historical_item_id uuid;
+  v_results jsonb := '[]'::jsonb;
+  v_already_processed_count integer := 0;
+  v_current_balance integer;
+  v_current_case_qty integer;
+  i integer;
+BEGIN
+  -- 1. 参数自检
+  IF p_times < 1 OR p_times > 10 THEN
+    RAISE EXCEPTION 'Invalid times: must be between 1 and 10';
+  END IF;
+  IF array_length(p_item_ids, 1) IS NULL OR array_length(p_item_ids, 1) <> p_times THEN
+    RAISE EXCEPTION 'Array length mismatch: item_ids';
+  END IF;
+  IF array_length(p_request_ids, 1) IS NULL OR array_length(p_request_ids, 1) <> p_times THEN
+    RAISE EXCEPTION 'Array length mismatch: request_ids';
+  END IF;
+  IF p_price <= 0 THEN
+    RAISE EXCEPTION 'Invalid price';
+  END IF;
+
+  -- 2. 统计本批中已被处理过的次数（幂等重试场景）
+  SELECT p_times - COUNT(*) INTO v_pending_count
+  FROM chest_open_events
+  WHERE user_id = p_user_id AND request_id = ANY(p_request_ids);
+
+  -- 3. 锁用户行，取当前余额
+  SELECT balance, stars INTO v_user_balance, v_user_stars
+  FROM users
+  WHERE id = p_user_id
+  FOR UPDATE;
+
+  IF v_user_balance IS NULL THEN
+    RAISE EXCEPTION 'User not found';
+  END IF;
+
+  v_current_balance := v_user_balance;
+
+  -- 4. 仅当存在未处理的开箱请求时，预检余额与宝箱数量
+  IF v_pending_count > 0 THEN
+    IF v_user_balance < p_price * v_pending_count THEN
+      RAISE EXCEPTION 'Insufficient balance';
+    END IF;
+
+    SELECT quantity INTO v_case_quantity
+    FROM user_cases
+    WHERE user_id = p_user_id AND case_id = p_chest_id
+    FOR UPDATE;
+
+    IF v_case_quantity IS NULL OR v_case_quantity < v_pending_count THEN
+      RAISE EXCEPTION 'Not enough chests';
+    END IF;
+
+    v_current_case_qty := v_case_quantity;
+  ELSE
+    -- 没有待处理项，也取当前数量用于返回快照
+    SELECT COALESCE(quantity, 0) INTO v_current_case_qty
+    FROM user_cases
+    WHERE user_id = p_user_id AND case_id = p_chest_id;
+    v_current_case_qty := COALESCE(v_current_case_qty, 0);
+  END IF;
+
+  -- 5. 逐次开箱：每次独立抢占 event，已处理则返回历史结果
+  FOR i IN 1..p_times LOOP
+    v_claimed_id := NULL;
+
+    INSERT INTO chest_open_events (user_id, case_id, request_id, price, created_at)
+    VALUES (p_user_id, p_chest_id, p_request_ids[i], p_price, now())
+    ON CONFLICT (user_id, request_id) DO NOTHING
+    RETURNING id INTO v_claimed_id;
+
+    IF v_claimed_id IS NULL THEN
+      SELECT item_id INTO v_historical_item_id
+      FROM chest_open_events
+      WHERE user_id = p_user_id AND request_id = p_request_ids[i];
+
+      v_results := v_results || jsonb_build_object(
+        'index', i - 1,
+        'item_id', v_historical_item_id,
+        'already_processed', true
+      );
+      v_already_processed_count := v_already_processed_count + 1;
+      CONTINUE;
+    END IF;
+
+    -- 扣除余额 & 宝箱数
+    UPDATE users
+    SET balance = balance - p_price
+    WHERE id = p_user_id;
+
+    UPDATE user_cases
+    SET quantity = quantity - 1, updated_at = now()
+    WHERE user_id = p_user_id AND case_id = p_chest_id;
+
+    v_current_balance := v_current_balance - p_price;
+    v_current_case_qty := v_current_case_qty - 1;
+
+    -- 发放物品（upsert 保证同一物品累加）
+    INSERT INTO user_items (user_id, item_id, quantity, created_at, updated_at)
+    VALUES (p_user_id, p_item_ids[i], 1, now(), now())
+    ON CONFLICT (user_id, item_id)
+    DO UPDATE SET quantity = user_items.quantity + 1, updated_at = now();
+
+    -- 事件快照
+    UPDATE chest_open_events
+    SET
+      item_id = p_item_ids[i],
+      balance_before = v_current_balance + p_price,
+      balance_after = v_current_balance,
+      stars_before = v_user_stars,
+      stars_after = v_user_stars,
+      case_quantity_before = v_current_case_qty + 1,
+      case_quantity_after = v_current_case_qty
+    WHERE id = v_claimed_id;
+
+    v_results := v_results || jsonb_build_object(
+      'index', i - 1,
+      'item_id', p_item_ids[i],
+      'already_processed', false
+    );
+  END LOOP;
+
+  -- 6. 最终快照返回
+  SELECT balance, stars INTO v_balance_after, v_stars_after
+  FROM users
+  WHERE id = p_user_id;
+
+  SELECT COALESCE(quantity, 0) INTO v_case_quantity_after
+  FROM user_cases
+  WHERE user_id = p_user_id AND case_id = p_chest_id;
+
+  RETURN json_build_object(
+    'success', true,
+    'items', v_results,
+    'already_processed_count', v_already_processed_count,
+    'assets', json_build_object('balance', v_balance_after, 'stars', v_stars_after),
+    'case_quantity_after', v_case_quantity_after
+  );
+END;
+$function$
+```
+
+---
+
+### 3.7 `shop_purchase`
 
 | 属性 | 值 |
 |------|-----|
@@ -956,6 +1153,7 @@ $function$
 | `public` | `cleanup_expired_rate_limits` | `void` | 是 |
 | `public` | `execute_asset_transaction` | `json` | 是 |
 | `public` | `open_chest_secure` | `json` | 是 |
+| `public` | `open_chest_batch_secure` | `json` | 是 |
 | `public` | `shop_purchase` | `json` | 是 |
 | `public` | `set_updated_at` | `trigger` | **否** |
 | `public` | `tg_invite_rewards_guard` | `trigger` | **否** |
@@ -963,4 +1161,4 @@ $function$
 | `public` | `tg_user_invites_set_snapshots_and_guard` | `trigger` | **否** |
 | `public` | `tg_user_invites_update_guard` | `trigger` | **否** |
 
-**合计：** `graphql_public` 1 个 + `public` 11 个 = **12** 个函数。
+**合计：** `graphql_public` 1 个 + `public` 12 个 = **13** 个函数。
