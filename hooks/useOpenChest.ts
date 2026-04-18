@@ -123,6 +123,9 @@ export const BATCH_ROULETTE_TARGET_IDX = 24;
 
 export type OpenMode = 'single' | 'batch';
 
+/** 十连：每条独立轮盘序列与终点位移（与单抽同宽 100px/格） */
+export type BatchRouletteStrip = { items: PrizeViewItem[]; targetX: number };
+
 export function useOpenChest(currentChest: UserChestInstance | null) {
   const initData = useUserStore((s) => s.initData);
   const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
@@ -136,15 +139,21 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
   const [wonItem, setWonItem] = useState<PrizeViewItem | null>(null);
   const [wonItems, setWonItems] = useState<PrizeViewItem[]>([]);
   const [targetX, setTargetX] = useState(0);
+  const [batchRouletteStrips, setBatchRouletteStrips] = useState<BatchRouletteStrip[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   const lastTickIndex = useRef(-1);
+  const isSpinningRef = useRef(false);
+  isSpinningRef.current = isSpinning;
+  const openModeRef = useRef(openMode);
+  openModeRef.current = openMode;
   // 保存本批 requestIds，重试时复用以保证幂等
   const batchRequestIdsRef = useRef<string[] | null>(null);
 
   useMotionValueEvent(x, 'change', (latest) => {
-    if (!isSpinning) return;
+    // 十连时每条轮盘自带 tick，此处仅单开
+    if (!isSpinningRef.current || openModeRef.current !== 'single') return;
     const idx = Math.floor(Math.abs(latest) / 100);
     if (idx !== lastTickIndex.current) {
       lastTickIndex.current = idx;
@@ -159,6 +168,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
     setShowResult(false);
     setIsSpinning(false);
     setRouletteItems([]);
+    setBatchRouletteStrips([]);
     setWonItems([]);
     setActionError(null);
     x.set(0);
@@ -231,6 +241,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
 
         const items = buildRouletteItems(serverWonItem, false);
         setRouletteItems(items);
+        setBatchRouletteStrips([]);
         setWonItem(items[SINGLE_ROULETTE_TARGET_IDX]);
         setWonItems([]);
 
@@ -283,11 +294,16 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
         void useCollectionStore.getState().refreshSilent(initData);
         void useUserStore.getState().syncSilent(initData);
 
-        // 轮盘焦点用最高稀有度物品
-        const highlight = findHighestRarityItem(serverWonItems) ?? serverWonItems[0];
-        const items = buildRouletteItems(highlight, true);
-        setRouletteItems(items);
-        setWonItem(items[BATCH_ROULETTE_TARGET_IDX]);
+        // 十连：10 条独立轮盘，每条以对应奖品为终点
+        const strips: BatchRouletteStrip[] = serverWonItems.map((wonItem, i) => {
+          const items = buildRouletteItems(wonItem, true);
+          const offset = ((randomOffset + i * 17) % 60) - 30;
+          const tx = -(BATCH_ROULETTE_TARGET_IDX * 100 + 50) + offset;
+          return { items, targetX: tx };
+        });
+        setRouletteItems([]);
+        setBatchRouletteStrips(strips);
+        setWonItem(null);
         setWonItems(serverWonItems);
 
         setIsOpeningPending(false);
@@ -295,7 +311,6 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
 
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            setTargetX(-(BATCH_ROULETTE_TARGET_IDX * 100 + 50) + randomOffset);
             setIsSpinning(true);
           });
         });
@@ -319,6 +334,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
     wonItem,
     wonItems,
     rouletteItems,
+    batchRouletteStrips,
     targetX,
     x,
     containerRef,

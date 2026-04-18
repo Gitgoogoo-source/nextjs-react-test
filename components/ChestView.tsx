@@ -43,6 +43,7 @@ export default function ChestView() {
     wonItem,
     wonItems,
     rouletteItems,
+    batchRouletteStrips,
     targetX,
     x,
     containerRef,
@@ -105,6 +106,7 @@ export default function ChestView() {
         wonItem={wonItem}
         wonItems={wonItems}
         rouletteItems={rouletteItems}
+        batchRouletteStrips={batchRouletteStrips}
         targetX={targetX}
         x={x}
         containerRef={containerRef}
