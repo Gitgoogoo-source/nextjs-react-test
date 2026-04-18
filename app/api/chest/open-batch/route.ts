@@ -116,7 +116,8 @@ export async function POST(request: Request) {
 
     // 应用层预检（RPC 内还有原子级校验，这里提前快速失败）
     const { userCase, caseErr } = await validateUserHasChest(supabase, dbUser.id, chestId);
-    if (caseErr || !userCase || userCase.quantity < BATCH_TIMES) return jsonActionErr('宝箱数量不足', 400);
+    // 十连只需持有 1 个宝箱实例，RPC 内原子扣减
+    if (caseErr || !userCase || userCase.quantity < 1) return jsonActionErr('宝箱数量不足', 400);
     if (Number(dbUser.balance ?? 0) < price * BATCH_TIMES) return jsonActionErr('叶子不足', 400);
 
     // 服务端抽奖（随机源在 Node 端，与单开保持一致）

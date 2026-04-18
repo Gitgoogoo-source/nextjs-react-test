@@ -93,7 +93,8 @@ export default function ChestView() {
   const bal = Number(userBalance ?? 0);
 
   const canSingle = currentChestQuantity >= 1 && bal >= price;
-  const canBatch = currentChestQuantity >= 10 && bal >= price * 10;
+  // 十连只消耗 1 个宝箱实例，余额需覆盖 10 次价格
+  const canBatch = currentChestQuantity >= 1 && bal >= price * 10;
 
   if (isOpening) {
     return (
