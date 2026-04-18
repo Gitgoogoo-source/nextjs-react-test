@@ -6,7 +6,7 @@
 |------|------|
 | **数据来源** | Supabase MCP `execute_sql`：`pg_proc`、`pg_get_function_identity_arguments`、`pg_get_functiondef` |
 | **远程项目** | `reactTest`（`project_id`: `tfgzxvabdlnkpbikgcjv`） |
-| **同步时间** | 2026-04-18（`pg_get_functiondef` 与 Supabase MCP `list_tables` / `execute_sql` 只读核对；含 `open_chest_batch_secure`、`check_and_increment_rate_limit(..., p_delta)`） |
+| **同步时间** | 2026-04-19（`pg_get_functiondef` 与 Supabase MCP `list_tables` / `execute_sql` 只读核对；`open_chest_secure` / `open_chest_batch_secure` 为库内加权随机，无 `p_item_id` / `p_item_ids`） |
 | **说明** | 部署或 migration 变更后，远程定义可能与本文档不一致；请以数据库为准或重新拉取 `pg_get_functiondef`。 |
 
 ---
@@ -24,19 +24,17 @@ await supabase.rpc('open_chest_secure', {
   p_user_id: '...',
   p_chest_id: '...',
   p_price: 100,
-  p_item_id: '...',
   p_request_id: '...',
 });
 ```
 
-批量开箱（数组长度与 `p_times` 一致；`p_delta` 可省略，默认为 `1`）：
+批量开箱（`p_request_ids` 长度须与 `p_times` 一致；`p_delta` 可省略，默认为 `1`）：
 
 ```ts
 await supabase.rpc('open_chest_batch_secure', {
   p_user_id: '...',
   p_chest_id: '...',
   p_price: 100,
-  p_item_ids: [/* uuid[], len = p_times */],
   p_request_ids: [/* uuid[], len = p_times */],
   p_times: 3,
 });
@@ -397,38 +395,34 @@ $function$
 
 | 属性 | 值 |
 |------|-----|
-| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price integer, p_item_id uuid, p_request_id uuid` |
+| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price integer, p_request_id uuid` |
 | **返回类型** | `json` |
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | `false` |
-| **行为摘要** | `chest_open_events (user_id, request_id)` 幂等抢占；扣余额与 `user_cases`；发放/合并 `user_items`；写回事件中的前后资产与箱数；重复请求返回已存结果。失败时 `RAISE EXCEPTION`（如余额不足、无箱、用户不存在）。 |
+| **行为摘要** | `chest_open_events (user_id, request_id)` 幂等抢占；在 `case_items` 上按 `drop_chance` 做库内加权随机（`ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC LIMIT 1`）；扣余额与 `user_cases`；发放/合并 `user_items`；写回事件中的前后资产与箱数；重复请求返回已存结果。失败时 `RAISE EXCEPTION`（如余额不足、无箱、无掉落配置、用户不存在）。 |
 
-> **PostgREST / 重载**：历史上若同时存在 `p_price integer` 与 `p_price bigint` 两个五参数重载，PostgREST 会对 JSON 数字报 **PGRST203**（无法选择候选函数）。迁移 `20260419000000_open_chest_secure_resolve_pgrest_overload.sql` 已删除全部重载并**仅保留本签名**（`p_price integer`）。客户端 `supabase.rpc(..., { p_price: number })` 与此唯一重载匹配。
+> **PostgREST / 重载**：若同时存在多个 `open_chest_secure` 重载，PostgREST 可能对 JSON 参数报 **PGRST203**。远程当前**仅保留本四参数签名**（`p_price integer`，无客户端传入的 `p_item_id`）。`supabase.rpc(..., { p_price: number })` 与此匹配。
 
-**源定义**（与仓库迁移及远程 `pg_get_functiondef` 一致）：
+**源定义**（与远程 `pg_get_functiondef` 一致）：
 
 ```sql
-CREATE OR REPLACE FUNCTION public.open_chest_secure(
-  p_user_id uuid,
-  p_chest_id uuid,
-  p_price integer,
-  p_item_id uuid,
-  p_request_id uuid
-) RETURNS json
+CREATE OR REPLACE FUNCTION public.open_chest_secure(p_user_id uuid, p_chest_id uuid, p_price integer, p_request_id uuid)
+ RETURNS json
  LANGUAGE plpgsql
 AS $function$
 DECLARE
-  v_user_balance integer;
-  v_user_stars integer;
-  v_case_quantity integer;
-  v_user_item_id uuid;
-  v_claimed_id uuid;
-  v_event_item_id uuid;
-  v_event_balance_after integer;
-  v_event_stars_after integer;
-  v_event_case_quantity_after integer;
+  v_user_balance          integer;
+  v_user_stars            integer;
+  v_case_quantity         integer;
+  v_claimed_id            uuid;
+  v_event_item_id         uuid;
+  v_event_balance_after   integer;
+  v_event_stars_after     integer;
+  v_event_case_qty_after  integer;
+  v_picked_item_id        uuid;
 BEGIN
+  -- 0) 幂等抢占：抢到则继续，否则返回历史结果
   INSERT INTO chest_open_events (user_id, case_id, request_id, price, created_at)
   VALUES (p_user_id, p_chest_id, p_request_id, p_price, now())
   ON CONFLICT (user_id, request_id) DO NOTHING
@@ -436,91 +430,86 @@ BEGIN
 
   IF v_claimed_id IS NULL THEN
     SELECT item_id, balance_after, stars_after, case_quantity_after
-      INTO v_event_item_id, v_event_balance_after, v_event_stars_after, v_event_case_quantity_after
+      INTO v_event_item_id, v_event_balance_after, v_event_stars_after, v_event_case_qty_after
     FROM chest_open_events
     WHERE user_id = p_user_id AND request_id = p_request_id
     FOR UPDATE;
 
     RETURN json_build_object(
-      'success', true,
+      'success',           true,
       'already_processed', true,
-      'item_id', v_event_item_id,
-      'assets', json_build_object('balance', v_event_balance_after, 'stars', v_event_stars_after),
-      'case_quantity_after', v_event_case_quantity_after
+      'item_id',           v_event_item_id,
+      'assets',            json_build_object('balance', v_event_balance_after, 'stars', v_event_stars_after),
+      'case_quantity_after', v_event_case_qty_after
     );
   END IF;
 
+  -- 1) 锁用户行，检查余额
   SELECT balance, stars INTO v_user_balance, v_user_stars
-  FROM users
-  WHERE id = p_user_id
-  FOR UPDATE;
+  FROM users WHERE id = p_user_id FOR UPDATE;
 
-  IF v_user_balance IS NULL THEN
-    RAISE EXCEPTION 'User not found';
-  END IF;
+  IF v_user_balance IS NULL THEN RAISE EXCEPTION 'User not found'; END IF;
+  IF v_user_balance < p_price    THEN RAISE EXCEPTION 'Insufficient balance'; END IF;
 
-  IF v_user_balance < p_price THEN
-    RAISE EXCEPTION 'Insufficient balance';
-  END IF;
-
+  -- 2) 锁宝箱库存行，检查数量
   SELECT quantity INTO v_case_quantity
-  FROM user_cases
-  WHERE user_id = p_user_id AND case_id = p_chest_id
-  FOR UPDATE;
+  FROM user_cases WHERE user_id = p_user_id AND case_id = p_chest_id FOR UPDATE;
 
   IF v_case_quantity IS NULL OR v_case_quantity <= 0 THEN
     RAISE EXCEPTION 'Not enough chests';
   END IF;
 
-  UPDATE users
-  SET balance = balance - p_price
-  WHERE id = p_user_id;
+  -- 3) DB 侧加权随机抽奖（Gumbel-max trick：按 drop_chance 权重抽 1 个）
+  --    random() ^ (1/w) 等价于按权重 w 进行无放回 Gumbel 采样，取最大值即中奖物品
+  SELECT item_id INTO v_picked_item_id
+  FROM case_items
+  WHERE case_id = p_chest_id AND drop_chance > 0
+  ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC
+  LIMIT 1;
 
+  IF v_picked_item_id IS NULL THEN
+    RAISE EXCEPTION 'No items configured for this chest';
+  END IF;
+
+  -- 4) 扣余额
+  UPDATE users SET balance = balance - p_price WHERE id = p_user_id;
+
+  -- 5) 扣宝箱
   UPDATE user_cases
   SET quantity = quantity - 1, updated_at = now()
   WHERE user_id = p_user_id AND case_id = p_chest_id;
 
-  SELECT id INTO v_user_item_id
-  FROM user_items
-  WHERE user_id = p_user_id AND item_id = p_item_id
-  FOR UPDATE;
+  -- 6) 发放物品
+  INSERT INTO user_items (user_id, item_id, quantity, created_at, updated_at)
+  VALUES (p_user_id, v_picked_item_id, 1, now(), now())
+  ON CONFLICT (user_id, item_id)
+  DO UPDATE SET quantity = user_items.quantity + 1, updated_at = now();
 
-  IF v_user_item_id IS NOT NULL THEN
-    UPDATE user_items
-    SET quantity = quantity + 1, updated_at = now()
-    WHERE id = v_user_item_id;
-  ELSE
-    INSERT INTO user_items (user_id, item_id, quantity, created_at, updated_at)
-    VALUES (p_user_id, p_item_id, 1, now(), now())
-    ON CONFLICT (user_id, item_id)
-    DO UPDATE SET quantity = user_items.quantity + 1, updated_at = now();
-  END IF;
-
+  -- 7) 读取事后快照
   SELECT balance, stars INTO v_event_balance_after, v_event_stars_after
-  FROM users
-  WHERE id = p_user_id;
+  FROM users WHERE id = p_user_id;
 
-  SELECT quantity INTO v_event_case_quantity_after
-  FROM user_cases
-  WHERE user_id = p_user_id AND case_id = p_chest_id;
+  SELECT quantity INTO v_event_case_qty_after
+  FROM user_cases WHERE user_id = p_user_id AND case_id = p_chest_id;
 
+  -- 8) 填充事件记录（抢占的那行），保证幂等 key 对应唯一结果
   UPDATE chest_open_events
   SET
-    item_id = p_item_id,
-    balance_before = v_user_balance,
-    balance_after = v_event_balance_after,
-    stars_before = v_user_stars,
-    stars_after = v_event_stars_after,
+    item_id              = v_picked_item_id,
+    balance_before       = v_user_balance,
+    balance_after        = v_event_balance_after,
+    stars_before         = v_user_stars,
+    stars_after          = v_event_stars_after,
     case_quantity_before = v_case_quantity,
-    case_quantity_after = v_event_case_quantity_after
+    case_quantity_after  = v_event_case_qty_after
   WHERE id = v_claimed_id;
 
   RETURN json_build_object(
-    'success', true,
+    'success',           true,
     'already_processed', false,
-    'item_id', p_item_id,
-    'assets', json_build_object('balance', v_event_balance_after, 'stars', v_event_stars_after),
-    'case_quantity_after', v_event_case_quantity_after
+    'item_id',           v_picked_item_id,
+    'assets',            json_build_object('balance', v_event_balance_after, 'stars', v_event_stars_after),
+    'case_quantity_after', v_event_case_qty_after
   );
 END;
 $function$
@@ -532,44 +521,40 @@ $function$
 
 | 属性 | 值 |
 |------|-----|
-| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price integer, p_item_ids uuid[], p_request_ids uuid[], p_times integer` |
+| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price integer, p_request_ids uuid[], p_times integer` |
 | **返回类型** | `json` |
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | `false` |
-| **行为摘要** | 单事务内连续开箱 `p_times` 次（1–10）：`p_item_ids` / `p_request_ids` 长度须与 `p_times` 一致；按 `chest_open_events (user_id, request_id)` 幂等抢占，与 `open_chest_secure` 相同事件表；已存在的 `request_id` 跳过扣费并合并历史 `item_id` 到 `items` 数组；否则扣 `p_price`、减箱、发放对应 `user_items` 并写事件快照。失败时 `RAISE EXCEPTION`（余额不足、箱数不足、参数非法等）。 |
-
-> 迁移：`supabase/migrations/20260418103000_add_open_chest_batch_secure.sql`。
+| **行为摘要** | 单事务内连续开箱 `p_times` 次（1–10）：`p_request_ids` 长度须与 `p_times` 一致；每次在 `case_items` 上库内加权随机抽 `item_id`；按 `chest_open_events (user_id, request_id)` 幂等抢占；已存在的 `request_id` 不重复扣费并返回历史 `item_id`；否则扣 `p_price`、减箱、发放 `user_items` 并写事件快照。失败时 `RAISE EXCEPTION`（余额不足、箱数不足、参数非法、无掉落配置等）。 |
 
 **源定义**（与远程 `pg_get_functiondef` 一致）：
 
 ```sql
-CREATE OR REPLACE FUNCTION public.open_chest_batch_secure(p_user_id uuid, p_chest_id uuid, p_price integer, p_item_ids uuid[], p_request_ids uuid[], p_times integer)
+CREATE OR REPLACE FUNCTION public.open_chest_batch_secure(p_user_id uuid, p_chest_id uuid, p_price integer, p_request_ids uuid[], p_times integer)
  RETURNS json
  LANGUAGE plpgsql
 AS $function$
 DECLARE
-  v_user_balance integer;
-  v_user_stars integer;
-  v_case_quantity integer;
-  v_pending_count integer;
-  v_balance_after integer;
-  v_stars_after integer;
-  v_case_quantity_after integer;
-  v_claimed_id uuid;
-  v_historical_item_id uuid;
-  v_results jsonb := '[]'::jsonb;
-  v_already_processed_count integer := 0;
-  v_current_balance integer;
-  v_current_case_qty integer;
-  i integer;
+  v_user_balance    integer;
+  v_user_stars      integer;
+  v_case_quantity   integer;
+  v_pending_count   integer;
+  v_balance_after   integer;
+  v_stars_after     integer;
+  v_case_qty_after  integer;
+  v_claimed_id      uuid;
+  v_hist_item_id    uuid;
+  v_results         jsonb  := '[]'::jsonb;
+  v_already_count   integer := 0;
+  v_cur_balance     integer;
+  v_cur_case_qty    integer;
+  v_picked_item_id  uuid;
+  i                 integer;
 BEGIN
-  -- 1. 参数自检
+  -- 参数自检
   IF p_times < 1 OR p_times > 10 THEN
     RAISE EXCEPTION 'Invalid times: must be between 1 and 10';
-  END IF;
-  IF array_length(p_item_ids, 1) IS NULL OR array_length(p_item_ids, 1) <> p_times THEN
-    RAISE EXCEPTION 'Array length mismatch: item_ids';
   END IF;
   IF array_length(p_request_ids, 1) IS NULL OR array_length(p_request_ids, 1) <> p_times THEN
     RAISE EXCEPTION 'Array length mismatch: request_ids';
@@ -578,48 +563,38 @@ BEGIN
     RAISE EXCEPTION 'Invalid price';
   END IF;
 
-  -- 2. 统计本批中已被处理过的次数（幂等重试场景）
+  -- 统计本批中已处理的次数（幂等重试场景）
   SELECT p_times - COUNT(*) INTO v_pending_count
   FROM chest_open_events
   WHERE user_id = p_user_id AND request_id = ANY(p_request_ids);
 
-  -- 3. 锁用户行，取当前余额
+  -- 锁用户行
   SELECT balance, stars INTO v_user_balance, v_user_stars
-  FROM users
-  WHERE id = p_user_id
-  FOR UPDATE;
+  FROM users WHERE id = p_user_id FOR UPDATE;
 
-  IF v_user_balance IS NULL THEN
-    RAISE EXCEPTION 'User not found';
-  END IF;
+  IF v_user_balance IS NULL THEN RAISE EXCEPTION 'User not found'; END IF;
 
-  v_current_balance := v_user_balance;
+  v_cur_balance := v_user_balance;
 
-  -- 4. 仅当存在未处理的开箱请求时，预检余额与宝箱数量
   IF v_pending_count > 0 THEN
     IF v_user_balance < p_price * v_pending_count THEN
       RAISE EXCEPTION 'Insufficient balance';
     END IF;
 
     SELECT quantity INTO v_case_quantity
-    FROM user_cases
-    WHERE user_id = p_user_id AND case_id = p_chest_id
-    FOR UPDATE;
+    FROM user_cases WHERE user_id = p_user_id AND case_id = p_chest_id FOR UPDATE;
 
     IF v_case_quantity IS NULL OR v_case_quantity < v_pending_count THEN
       RAISE EXCEPTION 'Not enough chests';
     END IF;
 
-    v_current_case_qty := v_case_quantity;
+    v_cur_case_qty := v_case_quantity;
   ELSE
-    -- 没有待处理项，也取当前数量用于返回快照
-    SELECT COALESCE(quantity, 0) INTO v_current_case_qty
-    FROM user_cases
-    WHERE user_id = p_user_id AND case_id = p_chest_id;
-    v_current_case_qty := COALESCE(v_current_case_qty, 0);
+    SELECT COALESCE(quantity, 0) INTO v_cur_case_qty
+    FROM user_cases WHERE user_id = p_user_id AND case_id = p_chest_id;
   END IF;
 
-  -- 5. 逐次开箱：每次独立抢占 event，已处理则返回历史结果
+  -- 逐次开箱
   FOR i IN 1..p_times LOOP
     v_claimed_id := NULL;
 
@@ -629,71 +604,66 @@ BEGIN
     RETURNING id INTO v_claimed_id;
 
     IF v_claimed_id IS NULL THEN
-      SELECT item_id INTO v_historical_item_id
+      -- 已处理：返回历史结果
+      SELECT item_id INTO v_hist_item_id
       FROM chest_open_events
       WHERE user_id = p_user_id AND request_id = p_request_ids[i];
 
-      v_results := v_results || jsonb_build_object(
-        'index', i - 1,
-        'item_id', v_historical_item_id,
-        'already_processed', true
-      );
-      v_already_processed_count := v_already_processed_count + 1;
+      v_results     := v_results || jsonb_build_object('index', i - 1, 'item_id', v_hist_item_id, 'already_processed', true);
+      v_already_count := v_already_count + 1;
       CONTINUE;
     END IF;
 
-    -- 扣除余额 & 宝箱数
-    UPDATE users
-    SET balance = balance - p_price
-    WHERE id = p_user_id;
+    -- DB 侧加权随机抽奖（Gumbel-max trick）
+    SELECT item_id INTO v_picked_item_id
+    FROM case_items
+    WHERE case_id = p_chest_id AND drop_chance > 0
+    ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC
+    LIMIT 1;
 
-    UPDATE user_cases
-    SET quantity = quantity - 1, updated_at = now()
+    IF v_picked_item_id IS NULL THEN
+      RAISE EXCEPTION 'No items configured for this chest';
+    END IF;
+
+    -- 扣余额 & 宝箱
+    UPDATE users SET balance = balance - p_price WHERE id = p_user_id;
+    UPDATE user_cases SET quantity = quantity - 1, updated_at = now()
     WHERE user_id = p_user_id AND case_id = p_chest_id;
 
-    v_current_balance := v_current_balance - p_price;
-    v_current_case_qty := v_current_case_qty - 1;
+    v_cur_balance  := v_cur_balance  - p_price;
+    v_cur_case_qty := v_cur_case_qty - 1;
 
-    -- 发放物品（upsert 保证同一物品累加）
+    -- 发放物品
     INSERT INTO user_items (user_id, item_id, quantity, created_at, updated_at)
-    VALUES (p_user_id, p_item_ids[i], 1, now(), now())
+    VALUES (p_user_id, v_picked_item_id, 1, now(), now())
     ON CONFLICT (user_id, item_id)
     DO UPDATE SET quantity = user_items.quantity + 1, updated_at = now();
 
     -- 事件快照
     UPDATE chest_open_events
     SET
-      item_id = p_item_ids[i],
-      balance_before = v_current_balance + p_price,
-      balance_after = v_current_balance,
-      stars_before = v_user_stars,
-      stars_after = v_user_stars,
-      case_quantity_before = v_current_case_qty + 1,
-      case_quantity_after = v_current_case_qty
+      item_id              = v_picked_item_id,
+      balance_before       = v_cur_balance + p_price,
+      balance_after        = v_cur_balance,
+      stars_before         = v_user_stars,
+      stars_after          = v_user_stars,
+      case_quantity_before = v_cur_case_qty + 1,
+      case_quantity_after  = v_cur_case_qty
     WHERE id = v_claimed_id;
 
-    v_results := v_results || jsonb_build_object(
-      'index', i - 1,
-      'item_id', p_item_ids[i],
-      'already_processed', false
-    );
+    v_results := v_results || jsonb_build_object('index', i - 1, 'item_id', v_picked_item_id, 'already_processed', false);
   END LOOP;
 
-  -- 6. 最终快照返回
-  SELECT balance, stars INTO v_balance_after, v_stars_after
-  FROM users
-  WHERE id = p_user_id;
-
-  SELECT COALESCE(quantity, 0) INTO v_case_quantity_after
-  FROM user_cases
-  WHERE user_id = p_user_id AND case_id = p_chest_id;
+  -- 最终快照
+  SELECT balance, stars INTO v_balance_after, v_stars_after FROM users WHERE id = p_user_id;
+  SELECT COALESCE(quantity, 0) INTO v_case_qty_after FROM user_cases WHERE user_id = p_user_id AND case_id = p_chest_id;
 
   RETURN json_build_object(
-    'success', true,
-    'items', v_results,
-    'already_processed_count', v_already_processed_count,
-    'assets', json_build_object('balance', v_balance_after, 'stars', v_stars_after),
-    'case_quantity_after', v_case_quantity_after
+    'success',               true,
+    'items',                 v_results,
+    'already_processed_count', v_already_count,
+    'assets',                json_build_object('balance', v_balance_after, 'stars', v_stars_after),
+    'case_quantity_after',   v_case_qty_after
   );
 END;
 $function$
@@ -751,7 +721,7 @@ DECLARE
   v_final_quantity integer;
 BEGIN
   IF p_quantity IS NULL OR p_quantity <= 0 OR p_quantity > 100 THEN
-    RAISE EXCEPTION 'Invalid quantity';
+    RAISE EXCEPTION 'Invalid quantity' USING ERRCODE = 'P0004';
   END IF;
 
   -- 0) 幂等/并发安全：先“抢占”订单行。冲突时等待并返回已有结果。
@@ -784,7 +754,7 @@ BEGIN
 
   IF v_user_balance IS NULL THEN
     UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-    RAISE EXCEPTION 'User not found';
+    RAISE EXCEPTION 'User not found' USING ERRCODE = 'P0005';
   END IF;
 
   -- 2) 锁定商品行：确保 is_active / price / currency 一致
@@ -796,32 +766,32 @@ BEGIN
 
   IF v_product_type IS NULL THEN
     UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-    RAISE EXCEPTION 'Product not found or inactive';
+    RAISE EXCEPTION 'Product not found or inactive' USING ERRCODE = 'P0003';
   END IF;
 
   -- 3) 计算总价（bigint），并做基本安全检查
   v_total_price := v_unit_price * p_quantity;
   IF v_total_price < 0 THEN
     UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-    RAISE EXCEPTION 'Invalid total price';
+    RAISE EXCEPTION 'Invalid total price' USING ERRCODE = 'P0006';
   END IF;
 
   -- 4) 扣资源（根据 currency 选择字段）
   IF v_currency = 'balance' THEN
     IF v_user_balance < v_total_price THEN
       UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-      RAISE EXCEPTION 'Insufficient balance';
+      RAISE EXCEPTION 'Insufficient balance' USING ERRCODE = 'P0001';
     END IF;
     UPDATE users SET balance = balance - v_total_price WHERE id = p_user_id;
   ELSIF v_currency = 'stars' THEN
     IF COALESCE(v_user_stars, 0) < v_total_price THEN
       UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-      RAISE EXCEPTION 'Insufficient stars';
+      RAISE EXCEPTION 'Insufficient stars' USING ERRCODE = 'P0002';
     END IF;
     UPDATE users SET stars = stars - v_total_price WHERE id = p_user_id;
   ELSE
     UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-    RAISE EXCEPTION 'Unsupported currency';
+    RAISE EXCEPTION 'Unsupported currency' USING ERRCODE = 'P0007';
   END IF;
 
   -- 5) 发货：加库存（case -> user_cases；item -> user_items）
@@ -863,7 +833,7 @@ BEGIN
     END IF;
   ELSE
     UPDATE purchase_orders SET status = 'failed' WHERE id = v_claimed_id;
-    RAISE EXCEPTION 'Unsupported product_type';
+    RAISE EXCEPTION 'Unsupported product_type' USING ERRCODE = 'P0008';
   END IF;
 
   -- 6) 读取扣款后的资产（同事务内一致）

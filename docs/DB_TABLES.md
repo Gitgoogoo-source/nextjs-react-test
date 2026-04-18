@@ -2,7 +2,7 @@
 
 > 说明：本文件由 Supabase MCP **`list_tables`（verbose）只读查询**与 `information_schema` / `pg_stat_all_tables` 抽样核对生成，不包含任何写入/修改操作。
 > 
-> 同步时间：2026-04-18  
+> 同步时间：2026-04-19  
 > 项目：`reactTest`（project_id: `tfgzxvabdlnkpbikgcjv`）
 
 列说明：`类型` 为 Postgres `data_type`；`格式` 为 Supabase 返回的 `format`；`属性` 含 nullable / unique / generated 等；`默认值/检查/备注` 来自数据库元数据。
@@ -188,7 +188,7 @@ RLS: 开启 | 估算行数: 3
 
 ## public.case_items
 
-**场景说明**：单个箱子内的掉落池：可开出的 `items` 及 `drop_chance`（概率）。服务端按池子做随机，用于开箱结果计算。
+**场景说明**：单个箱子内的掉落池：可开出的 `items` 及 `drop_chance`（权重）。RPC `open_chest_secure` / `open_chest_batch_secure` 在库内对该池按 `ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC LIMIT 1` 抽样（Gumbel-max），用于开箱结果计算。
 
 RLS: 开启 | 估算行数: 11
 
@@ -282,9 +282,9 @@ RLS: 开启 | 估算行数: 0
 
 ## public.chest_open_events
 
-**场景说明**：开箱过程与结果流水：含幂等 `request_id`、扣费前后余额与 stars、箱子数量前后快照等，用于防重复请求、反作弊追溯与客服对账。RPC `open_chest_secure` / `open_chest_batch_secure` 形参为 `p_price integer`，写入本表 `price`（`bigint`）时由数据库隐式转换。
+**场景说明**：开箱过程与结果流水：含幂等 `request_id`、扣费前后余额与 stars、箱子数量前后快照等，用于防重复请求、反作弊追溯与客服对账。`item_id` 由 RPC 在数据库内按 `case_items.drop_chance` 加权随机（Gumbel-max）选出，客户端只传 `p_chest_id` 与 `p_request_id`（批量为 `p_request_ids`）；`p_price` 为 `integer`，写入本表 `price`（`bigint`）时由数据库隐式转换。
 
-RLS: 开启 | 估算行数: 25
+RLS: 开启 | 估算行数: 38
 
 | 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -463,7 +463,7 @@ RLS: 关闭 | 估算行数: 0
 
 **场景说明**：接口限流计数：按 `scope` + `route` + 时间窗口聚合请求次数，用于防刷、防滥用与保护服务端资源。
 
-RLS: 开启 | 估算行数: 65
+RLS: 开启 | 估算行数: 74
 
 | 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
 | --- | --- | --- | --- | --- | --- | --- |
