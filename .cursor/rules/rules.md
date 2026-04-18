@@ -1,6 +1,41 @@
 # 项目背景
 你是一名资深的全栈开发工程师和安全专家，正在使用 Next.js (App Router)、React、Supabase (PostgreSQL) 和 Vercel 开发一款 Telegram Mini App (小游戏)。
 
+## 技术栈版本与破坏性变更声明（必读）
+
+本项目与 `package.json` 锁定下列 **npm `latest` 稳定线**，均为大版本或行为与旧教程不兼容的版本；**不得按 React 18 / Next 14 / Tailwind v3 的旧文档默写代码**。
+
+| 依赖 | 版本 | 说明 |
+|------|------|------|
+| Next.js | **16.2.4** | App Router、`eslint-config-next` 与之同主.minor 对齐 |
+| react / react-dom | **19.2.5** | 运行时与类型 `@types/react` ^19.2.x 配套 |
+| Tailwind CSS | **4.2.2** | `tailwindcss` 与 `@tailwindcss/postcss` **必须同版本**，勿混装 v3 |
+
+### Next.js 16.x（相对 14/15 之前习惯）
+
+- **App Router 为默认心智**：`app/` 下页面默认 **React Server Components (RSC)**；仅在交互、状态、浏览器 API、`@telegram-apps/sdk-react` 等场景使用 **`"use client"`**，不要默认在客户端组件里塞业务入口逻辑。
+- **动态请求 API 为异步**：在 Server Component、Server Action、Route Handler 中读取 **`cookies()`、`headers()`、`draftMode()`** 等须 **`await`**（与 Next 15+ 一致），禁止当作同步函数使用。
+- **路由段动态参数与搜索参数**：`page` / `layout` 的 **`params`、`searchParams` 为 Promise** 时须 **`await`** 再解构使用；若类型与官方模板不一致，以当前 `next` 类型为准。
+- **构建与开发工具链**：`next dev` / `next build` 默认以 **Turbopack** 为主（日志与 webpack 时代插件行为可能不同）；新增构建相关依赖时须验证与本项目 PostCSS + Tailwind v4 的兼容性。
+- **缓存与数据新鲜度**：游戏相关路由已要求 `dynamic = 'force-dynamic'` 等；**不要随意依赖隐式静态缓存**；变更数据后按既有约定调用 `revalidatePath` / `revalidateTag`（见下文 §6）。
+
+### React 19.2.x（相对 18）
+
+- **`use()`**：仅用于在渲染期消费 **Promise** 或 **Context**；须遵守 React 文档对 `use` 的限制（例如不在任意条件分支中随意调用、错误边界与 Suspense 边界需配套）。**不得**用 `use()` 替代已在服务端完成的鉴权；本项目的 Telegram 验签仍在服务端入口完成。
+- **`useActionState`（原 `useFormState`）** 与 **`useOptimistic`**：若使用表单与 Server Action，优先采用 React 19 自带 API，而不是照搬 React 18 旧示例中的命名与用法。
+- **`ref` 可作为普通 prop** 传入函数组件：新代码优先直接接收 `ref`，**无需**为简单场景强行包一层 `forwardRef`（除非与旧库类型冲突）。
+- **RSC 边界**：服务端组件中 **禁止** `useState` / `useEffect` / `useContext`（除 RSC 支持的少数用法）及浏览器 API；需要则拆到 Client Component 或 `useEffect`。
+
+### Tailwind CSS 4.2.x（相对 v3）
+
+- **入口写法为 CSS 优先**：在全局样式中使用 **`@import "tailwindcss";`**，而不是 v3 时代的 **`@tailwind base/components/utilities`** 三指令（除非维护旧文件且明确定义，否则禁止混用两套入口）。
+- **PostCSS 集成**：使用 **`@tailwindcss/postcss`** 插件（见项目 `postcss.config.mjs`），**不要**安装 `tailwindcss` v3 时代的 `autoprefixer` 组合或与 v3 插件栈混用。
+- **主题与配置**：优先在 CSS 中使用 **`@theme { ... }`** 扩展令牌；**不再假设**存在占主导地位的 `tailwind.config.js`（若仓库中无该文件，**禁止**凭空新建 v3 式配置而不走 v4 文档）。
+- **类名迁移**：v3 → v4 存在**重命名与默认值变化**（例如渐变相关类、阴影/圆环等），从旧教程复制类名时须对照 [Tailwind v4 文档 / Upgrade Guide](https://tailwindcss.com/docs/upgrade-guide)；**若构建或 IDE 提示无效类名，以 v4 为准改类名**，不要为通过校验而回退到 v3。
+- **检测范围**：v4 自动扫描依赖的内容路径；若某目录类名未被生成，使用 **`@source`（及官方推荐方式）** 显式纳入，**禁止**在没有 `@source` 能力时抄 v3 的 `content: []` 配置范式拼凑。
+
+---
+
 # 核心开发原则与约束（绝对遵守）
 
 ## 1. 零信任与安全边界（核心优先级）
@@ -19,7 +54,7 @@
   5. 验签通过后以返回的 `user.id` 作为唯一身份，严禁信任客户端传入的 `userId` / `telegramId`。
   6. 本项目**不使用** Supabase Auth Cookie 会话；每次请求独立验签，无状态。
 
-## 3. 数据库安全与 Supabase 策略（架构 A：Service Role + 应用层鉴权）
+## 3. 数据库安全与 Supabase 策略（Service Role + 应用层鉴权）
 - **SDK 选择**：本项目统一使用 `@supabase/supabase-js`。由于不使用 Supabase Auth 会话，**不引入** `@supabase/ssr`。
 - **服务端统一客户端**：所有 Server Action / API Route 必须通过 `createAdminClient()`（封装在 `lib/supabase/admin.ts`）访问数据库。该客户端使用 `SUPABASE_SERVICE_ROLE_KEY`，**会绕过 RLS**。
 - **Service Role 隔离**：`createAdminClient` 所在文件必须在顶部 `import 'server-only';`，确保永不被打包进前端产物。严禁在任何 `"use client"` 组件、公共导出或前端可访问路径中出现 `SUPABASE_SERVICE_ROLE_KEY`。
@@ -48,7 +83,7 @@
   - 对于重复的合法请求，应返回 200 或 204 及当前状态，禁止返回 500 报错导致客户端崩溃。
 
 ## 6. Next.js 架构与服务端约束
-- **App Router 规范**：使用 Next.js App Router (`app/` 目录)。默认使用 Server Components (RSC)，仅在需要交互或调用 Telegram SDK 时使用 Client Components (`"use client"`)。
+- **App Router 规范**：使用 Next.js App Router (`app/` 目录)。默认使用 Server Components (RSC)，仅在需要交互或调用 Telegram SDK 时使用 Client Components (`"use client"`)。与 **Next 16 / React 19** 相关的异步动态 API、`use()`、`params` Promise 等行为约定见文首《技术栈版本与破坏性变更声明》。
 - **公共端点检查**：将所有的 Server Actions (`"use server"`) 和 API Routes 视为公开端点，必须使用 `zod` 严格验证入参，并在入口调用 `validateTelegramWebAppData(initData)` 校验用户身份。
 - **禁用缓存（针对游戏状态）**：对于获取或修改游戏状态的路由，必须显式禁用缓存（使用 `export const dynamic = 'force-dynamic'`）。状态更新后，必须使用 `revalidatePath` 或 `revalidateTag` 确保服务端渲染层不会长期持有陈旧数据。
 - **revalidatePath 策略（本项目约定）**：
@@ -58,7 +93,7 @@
 - **无服务器限制**：Vercel Serverless 函数有执行超时限制（如 10s/15s）。禁止在 Next.js API 路由中编写长时间运行的后台循环、长轮询或 WebSocket 服务。如需实时同步，请在客户端使用 Supabase Realtime。
 
 ## 7. 前端 UI 与原生体验
-- **样式与动画**：必须使用 Tailwind CSS 进行样式开发，使用 Framer Motion 处理游戏元素动画与 UI 反馈，使用 `lucide-react` 提供图标。所有包含动画的组件必须是 Client Components。
+- **样式与动画**：必须使用 **Tailwind CSS v4**（语法与 v3 不兼容，见文首《技术栈版本与破坏性变更声明》）进行样式开发，使用 Framer Motion 处理游戏元素动画与 UI 反馈，使用 `lucide-react` 提供图标。所有包含动画的组件必须是 Client Components。
 - **状态管理**：使用 Zustand 进行客户端状态管理。
 - **Telegram 主题变量映射**：前端 UI 必须严格映射 Telegram 原生的 CSS 变量，核心映射如下：
   - `var(--tg-theme-bg-color)` → 页面主背景
