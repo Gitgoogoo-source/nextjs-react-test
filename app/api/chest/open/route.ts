@@ -9,7 +9,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-type CaseItemDropRow = Pick<Database['public']['Tables']['case_items']['Row'], 'item_id' | 'drop_chance'>;
 type ItemDisplayRow = Pick<Database['public']['Tables']['items']['Row'], 'id' | 'name' | 'rarity' | 'color' | 'border' | 'hex'>;
 
 type RpcResult = {
@@ -25,24 +24,9 @@ const openChestSchema = z.object({
   initData: z.string().min(1),
 });
 
-function pickWeightedItem(rows: { item_id: string; weight: number }[]) {
-  const total = rows.reduce((acc, r) => acc + r.weight, 0);
-  if (!Number.isFinite(total) || total <= 0) return null;
-  let cumulative = 0;
-  const rand = Math.random() * total;
-  for (const r of rows) {
-    cumulative += r.weight;
-    if (rand <= cumulative) return r.item_id;
-  }
-  return rows[rows.length - 1]?.item_id ?? null;
-}
-
-async function loadChestConfig(supabase: SupabaseClient<Database>, chestId: string) {
-  const [chestRes, itemsRes] = await Promise.all([
-    supabase.from('cases').select('id, price, case_key').eq('id', chestId).maybeSingle(),
-    supabase.from('case_items').select('item_id, drop_chance').eq('case_id', chestId),
-  ]);
-  return { chestInfo: chestRes.data, chestErr: chestRes.error, caseItems: itemsRes.data, caseItemsErr: itemsRes.error };
+async function loadChestPrice(supabase: SupabaseClient<Database>, chestId: string) {
+  const { data, error } = await supabase.from('cases').select('id, price').eq('id', chestId).maybeSingle();
+  return { chestInfo: data, chestErr: error };
 }
 
 async function loadUserRecord(supabase: SupabaseClient<Database>, telegramId: number) {
@@ -90,9 +74,9 @@ export async function POST(request: Request) {
     });
     if (!rateLimitResult.allowed) return rateLimitExceededResponse(rateLimitResult);
 
-    // 1. 并行加载宝箱配置与用户记录
-    const [{ chestInfo, chestErr, caseItems, caseItemsErr }, { dbUser, userErr }] = await Promise.all([
-      loadChestConfig(supabase, chestId),
+    // 1. 并行加载宝箱价格与用户记录（预检快速失败，RPC 内仍有原子校验）
+    const [{ chestInfo, chestErr }, { dbUser, userErr }] = await Promise.all([
+      loadChestPrice(supabase, chestId),
       loadUserRecord(supabase, tgUser.id),
     ]);
 
@@ -102,30 +86,17 @@ export async function POST(request: Request) {
     const price = Number(chestInfo.price ?? 0);
     if (!Number.isSafeInteger(price) || price <= 0) return jsonActionErr('宝箱价格无效', 400);
 
-    if (caseItemsErr) return jsonActionErr('数据库错误', 500);
-
-    const normalized = (caseItems || [])
-      .map((r) => r as CaseItemDropRow)
-      .filter((r) => r.item_id && Number(r.drop_chance) > 0)
-      .map((r) => ({ item_id: r.item_id, weight: Number(r.drop_chance) }));
-    if (normalized.length === 0) return jsonActionErr('宝箱掉落表未配置', 500);
-
     // 2. 校验用户拥有宝箱 + 余额
     const { userCase, caseErr } = await validateUserHasChest(supabase, dbUser.id, chestId);
     if (caseErr || !userCase || userCase.quantity <= 0) return jsonActionErr('宝箱数量不足', 400);
     if (Number(dbUser.balance ?? 0) < price) return jsonActionErr('叶子不足', 400);
 
-    // 3. 权重抽奖
-    const itemUuid = pickWeightedItem(normalized);
-    if (!itemUuid) return jsonActionErr('宝箱掉落表无效', 500);
-
-    // 4. 原子 RPC：扣宝箱 + 扣余额 + 发放物品
+    // 3. 原子 RPC：DB 侧抽奖 + 扣宝箱 + 扣余额 + 发放物品
     const effectiveRequestId = requestId ?? crypto.randomUUID();
     const { data: rpcData, error: rpcError } = await supabase.rpc('open_chest_secure', {
-      p_user_id: dbUser.id,
-      p_chest_id: chestId,
-      p_price: price,
-      p_item_id: itemUuid,
+      p_user_id:    dbUser.id,
+      p_chest_id:   chestId,
+      p_price:      price,
       p_request_id: effectiveRequestId,
     });
 
@@ -134,13 +105,15 @@ export async function POST(request: Request) {
       const msg = rpcError.message || '';
       if (msg.includes('Insufficient balance')) return jsonActionErr('叶子不足', 400);
       if (msg.includes('Not enough chests')) return jsonActionErr('宝箱数量不足', 400);
+      if (msg.includes('No items configured')) return jsonActionErr('宝箱掉落表未配置', 500);
       return jsonActionErr('服务器内部错误', 500);
     }
 
     const parsedRpc = rpcData as RpcResult;
-    const finalItemId = parsedRpc?.item_id || itemUuid;
+    const finalItemId = parsedRpc?.item_id;
+    if (!finalItemId) return jsonActionErr('抽奖结果无效', 500);
 
-    // 5. 读取最终物品信息与最新资产
+    // 4. 读取最终物品信息与最新资产
     const [{ item: finalItemInfo, itemErr: finalItemErr }, rpcAssets] = await Promise.all([
       loadFinalItem(supabase, finalItemId),
       parsedRpc?.assets ? Promise.resolve(parsedRpc.assets) : Promise.resolve(null),

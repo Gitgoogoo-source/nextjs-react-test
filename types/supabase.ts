@@ -722,7 +722,6 @@ export type Database = {
           p_user_id: string
           p_chest_id: string
           p_price: number
-          p_item_ids: string[]
           p_request_ids: string[]
           p_times: number
         }
@@ -744,7 +743,6 @@ export type Database = {
       open_chest_secure: {
         Args: {
           p_chest_id: string
-          p_item_id: string
           p_price: number
           p_request_id: string
           p_user_id: string
