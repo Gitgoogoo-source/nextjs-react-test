@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, 
-  ShoppingBag,
   Archive, 
   Package, 
   User, 
@@ -18,7 +17,6 @@ import Image from 'next/image';
 
 import ChestView from './ChestView';
 import CollectionView from './CollectionView';
-import ShopView from './ShopView';
 import FriendsView from './FriendsView';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore'; // 引入 Store
@@ -44,7 +42,6 @@ export default function AppLayout() {
 
   const tabs = [
     { id: 'market', label: '市场', icon: TrendingUp },
-    { id: 'shop', label: '商城', icon: ShoppingBag },
     { id: 'eggs', label: '藏品', icon: Archive, badge: 207 },
     { id: 'ducks', label: '宝箱', icon: Package },
     { id: 'friends', label: '好友', icon: User },
@@ -97,12 +94,14 @@ export default function AppLayout() {
         </div>
       </div>
 
-      {/* 主内容区域 */}
-      <div className="flex-1 relative overflow-y-auto">
+      {/* 主内容区域：宝箱页由内部区域滚动，其它 Tab 可整体滚动 */}
+      <div
+        className={`flex-1 relative min-h-0 ${
+          activeTab === 'ducks' ? 'overflow-hidden' : 'overflow-y-auto'
+        }`}
+      >
         {activeTab === 'ducks' ? (
           <ChestView />
-        ) : activeTab === 'shop' ? (
-          <ShopView />
         ) : activeTab === 'eggs' ? (
           <CollectionView />
         ) : activeTab === 'friends' ? (
