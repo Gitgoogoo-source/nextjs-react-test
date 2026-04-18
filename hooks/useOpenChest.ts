@@ -99,7 +99,10 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
   const initData = useUserStore((s) => s.initData);
   const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
 
+  /** 全屏轮盘阶段（已有开奖结果，展示动画） */
   const [isOpening, setIsOpening] = useState(false);
+  /** 请求 /api/chest/open 期间：留在宝箱页，避免先切全屏再失败导致黑屏闪退 */
+  const [isOpeningPending, setIsOpeningPending] = useState(false);
   const [rouletteItems, setRouletteItems] = useState<PrizeViewItem[]>([]);
   const [isSpinning, setIsSpinning] = useState(false);
   const [showResult, setShowResult] = useState(false);
@@ -122,6 +125,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
 
   const resetState = () => {
     setIsOpening(false);
+    setIsOpeningPending(false);
     setShowResult(false);
     setIsSpinning(false);
     setRouletteItems([]);
@@ -145,7 +149,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
   };
 
   const startOpen = async () => {
-    if (isOpening || !currentChest) return;
+    if (isOpening || isOpeningPending || !currentChest) return;
     setActionError(null);
     if (!initData) {
       setActionError('未获取到登录信息，请在 Telegram 内重新打开小游戏');
@@ -153,7 +157,7 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
       return;
     }
 
-    setIsOpening(true);
+    setIsOpeningPending(true);
     setShowResult(false);
     setIsSpinning(false);
     x.set(0);
@@ -167,11 +171,16 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
         body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData }),
       });
 
-      const body = (await response.json()) as {
+      let body: {
         success?: boolean;
         error?: string;
         data?: { wonItem: PrizeViewItem; randomOffset: number; userAssets?: { balance: number; stars: number } };
       };
+      try {
+        body = (await response.json()) as typeof body;
+      } catch {
+        throw new Error('服务器响应无效，请稍后重试');
+      }
 
       if (!response.ok || !body.success || !body.data) throw new Error(body.error || '开启宝箱失败');
 
@@ -186,15 +195,20 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
       setRouletteItems(items);
       setWonItem(items[44]);
 
-      setTimeout(() => {
-        if (containerRef.current) {
+      setIsOpeningPending(false);
+      setIsOpening(true);
+
+      // 轮盘 ref 仅用于布局，动画不依赖测量；双 rAF 确保全屏层已挂载后再开转，避免偶发跳过转动
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
           setTargetX(-(44 * 100 + 50) + randomOffset);
           setIsSpinning(true);
-        }
-      }, 100);
+        });
+      });
     } catch (error: unknown) {
       console.error('Error:', error);
       setIsOpening(false);
+      setIsOpeningPending(false);
       const message = error instanceof Error ? error.message : '开启宝箱失败，请重试';
       setActionError(message);
       try { telegramHapticNotify('error'); } catch (e) { console.error('Haptic notify failed', e); }
@@ -202,9 +216,18 @@ export function useOpenChest(currentChest: UserChestInstance | null) {
   };
 
   return {
-    isOpening, isSpinning, showResult, wonItem,
-    rouletteItems, targetX, x, containerRef,
+    isOpening,
+    isOpeningPending,
+    isSpinning,
+    showResult,
+    wonItem,
+    rouletteItems,
+    targetX,
+    x,
+    containerRef,
     actionError,
-    startOpen, resetState, handleSpinComplete,
+    startOpen,
+    resetState,
+    handleSpinComplete,
   };
 }

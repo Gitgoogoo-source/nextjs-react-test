@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { motion, useTransform, useMotionTemplate, type MotionValue } from 'framer-motion';
 import { Package } from 'lucide-react';
 import { ArrowLeft } from 'lucide-react';
@@ -54,6 +55,13 @@ export function RoulettePanel({
   isSpinning, showResult, wonItem, rouletteItems,
   targetX, x, containerRef, onSpinComplete, onClose,
 }: RoulettePanelProps) {
+  // 避免从「开启宝箱」抬手瞬间误触刚出现的「返回」
+  const [backReady, setBackReady] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setBackReady(true), 350);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <div className="fixed inset-0 w-screen h-screen flex flex-col items-center justify-center bg-background overflow-hidden z-50">
       {/* 网格背景 */}
@@ -62,8 +70,9 @@ export function RoulettePanel({
         <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-40 bg-tg-secondary-bg shadow-[0_0_50px_rgba(0,0,0,0.8)] border-y border-foreground/10" />
       </div>
 
-      {!isSpinning && !showResult && (
+      {!isSpinning && !showResult && backReady && (
         <button
+          type="button"
           onClick={onClose}
           className="absolute left-4 text-tg-hint hover:text-foreground flex items-center gap-2 z-20 mt-4 top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)]"
         >

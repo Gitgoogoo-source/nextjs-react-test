@@ -33,10 +33,19 @@ export default function ChestView() {
 
   const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
   const {
-    isOpening, isSpinning, showResult, wonItem,
-    rouletteItems, targetX, x, containerRef,
+    isOpening,
+    isOpeningPending,
+    isSpinning,
+    showResult,
+    wonItem,
+    rouletteItems,
+    targetX,
+    x,
+    containerRef,
     actionError,
-    startOpen, resetState, handleSpinComplete,
+    startOpen,
+    resetState,
+    handleSpinComplete,
   } = useOpenChest(currentChest);
 
   useEffect(() => {
@@ -63,12 +72,12 @@ export default function ChestView() {
   }, [chests]);
 
   const handleNext = () => {
-    if (isOpening || userChests.length === 0) return;
+    if (isOpening || isOpeningPending || userChests.length === 0) return;
     setCurrentIndex((prev) => (prev + 1) % userChests.length);
   };
 
   const handlePrev = () => {
-    if (isOpening || userChests.length === 0) return;
+    if (isOpening || isOpeningPending || userChests.length === 0) return;
     setCurrentIndex((prev) => (prev - 1 + userChests.length) % userChests.length);
   };
 
@@ -172,7 +181,7 @@ export default function ChestView() {
                 key={chest.uniqueId}
                 type="button"
                 onClick={() => {
-                  if (isOpening || idx === currentIndex) return;
+                  if (isOpening || isOpeningPending || idx === currentIndex) return;
                   setCurrentIndex(wrapIndex(idx, userChests.length));
                 }}
                 className="absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 backdrop-blur-md flex flex-col items-center justify-center p-6 shadow-xl transform-gpu will-change-transform focus:outline-none"
@@ -221,10 +230,10 @@ export default function ChestView() {
 
         <button
           onClick={startOpen}
-          disabled={isOpening}
+          disabled={isOpening || isOpeningPending}
           className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest?.color || ''} hover:opacity-90 transition-opacity shadow-lg ${currentChest?.shadow || ''} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
-          {isOpening ? '开启中...' : '开启宝箱'}
+          {isOpeningPending ? '开启中...' : '开启宝箱'}
         </button>
       </div>
     </div>
