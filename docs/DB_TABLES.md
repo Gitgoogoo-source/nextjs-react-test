@@ -1,8 +1,8 @@
 # 数据库表清单与表结构（Supabase Postgres）
 
-> 说明：本文件由 Supabase MCP **`list_tables`（verbose）只读查询**生成，不包含任何写入/修改操作。
+> 说明：本文件由 Supabase MCP **`list_tables`（verbose）只读查询**与 `information_schema` / `pg_stat_all_tables` 抽样核对生成，不包含任何写入/修改操作。
 > 
-> 生成时间：2026-04-18  
+> 同步时间：2026-04-19  
 > 项目：`reactTest`（project_id: `tfgzxvabdlnkpbikgcjv`）
 
 列说明：`类型` 为 Postgres `data_type`；`格式` 为 Supabase 返回的 `format`；`属性` 含 nullable / unique / generated 等；`默认值/检查/备注` 来自数据库元数据。
@@ -282,7 +282,7 @@ RLS: 开启 | 估算行数: 0
 
 ## public.chest_open_events
 
-**场景说明**：开箱过程与结果流水：含幂等 `request_id`、扣费前后余额与 stars、箱子数量前后快照等，用于防重复请求、反作弊追溯与客服对账。
+**场景说明**：开箱过程与结果流水：含幂等 `request_id`、扣费前后余额与 stars、箱子数量前后快照等，用于防重复请求、反作弊追溯与客服对账。RPC `open_chest_secure` 形参为 `p_price integer`，写入本表 `price`（`bigint`）时由数据库隐式转换。
 
 RLS: 开启 | 估算行数: 22
 
@@ -346,7 +346,7 @@ RLS: 开启 | 估算行数: 3
 
 **场景说明**：商店购买订单：幂等 `request_id`、订单状态、单价总价及支付前后快照；与 RPC/服务端原子扣款 + 发货流程配合。
 
-RLS: 开启 | 估算行数: 32
+RLS: 开启 | 估算行数: 36
 
 | 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -463,7 +463,7 @@ RLS: 关闭 | 估算行数: 0
 
 **场景说明**：接口限流计数：按 `scope` + `route` + 时间窗口聚合请求次数，用于防刷、防滥用与保护服务端资源。
 
-RLS: 开启 | 估算行数: 32
+RLS: 开启 | 估算行数: 57
 
 | 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
 | --- | --- | --- | --- | --- | --- | --- |

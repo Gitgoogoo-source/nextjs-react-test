@@ -6,6 +6,7 @@
 |------|------|
 | **数据来源** | Supabase MCP `execute_sql`：`pg_proc`、`pg_get_function_identity_arguments`、`pg_get_functiondef` |
 | **远程项目** | `reactTest`（`project_id`: `tfgzxvabdlnkpbikgcjv`） |
+| **同步时间** | 2026-04-19（`open_chest_secure` 等与迁移 `20260419000000_open_chest_secure_resolve_pgrest_overload` / 远程 `pg_get_functiondef` 对齐） |
 | **说明** | 部署或 migration 变更后，远程定义可能与本文档不一致；请以数据库为准或重新拉取 `pg_get_functiondef`。 |
 
 ---
@@ -372,46 +373,47 @@ $function$
 
 | 属性 | 值 |
 |------|-----|
-| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price bigint, p_item_id uuid, p_request_id uuid` |
+| **身份参数** | `p_user_id uuid, p_chest_id uuid, p_price integer, p_item_id uuid, p_request_id uuid` |
 | **返回类型** | `json` |
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | `false` |
 | **行为摘要** | `chest_open_events (user_id, request_id)` 幂等抢占；扣余额与 `user_cases`；发放/合并 `user_items`；写回事件中的前后资产与箱数；重复请求返回已存结果。失败时 `RAISE EXCEPTION`（如余额不足、无箱、用户不存在）。 |
 
-> **注意**：线上存在两个重载版本：
-> - `p_price bigint` 版本（当前主版本，见下方定义）
-> - `p_price integer` 版本（旧版，保留兼容性，使用 `USING ERRCODE` 返回 `99001`/`99002` 错误码）
+> **PostgREST / 重载**：历史上若同时存在 `p_price integer` 与 `p_price bigint` 两个五参数重载，PostgREST 会对 JSON 数字报 **PGRST203**（无法选择候选函数）。迁移 `20260419000000_open_chest_secure_resolve_pgrest_overload.sql` 已删除全部重载并**仅保留本签名**（`p_price integer`）。客户端 `supabase.rpc(..., { p_price: number })` 与此唯一重载匹配。
 
-**源定义：**
+**源定义**（与仓库迁移及远程 `pg_get_functiondef` 一致）：
 
 ```sql
-CREATE OR REPLACE FUNCTION public.open_chest_secure(p_user_id uuid, p_chest_id uuid, p_price bigint, p_item_id uuid, p_request_id uuid)
- RETURNS json
+CREATE OR REPLACE FUNCTION public.open_chest_secure(
+  p_user_id uuid,
+  p_chest_id uuid,
+  p_price integer,
+  p_item_id uuid,
+  p_request_id uuid
+) RETURNS json
  LANGUAGE plpgsql
 AS $function$
 DECLARE
-  v_user_balance bigint;
-  v_user_stars bigint;
+  v_user_balance integer;
+  v_user_stars integer;
   v_case_quantity integer;
   v_user_item_id uuid;
   v_claimed_id uuid;
   v_event_item_id uuid;
-  v_event_balance_after bigint;
-  v_event_stars_after bigint;
+  v_event_balance_after integer;
+  v_event_stars_after integer;
   v_event_case_quantity_after integer;
 BEGIN
-  -- 0) 幂等抢占：同一 user_id + request_id 只处理一次
-  INSERT INTO public.chest_open_events (user_id, case_id, request_id, price, created_at)
+  INSERT INTO chest_open_events (user_id, case_id, request_id, price, created_at)
   VALUES (p_user_id, p_chest_id, p_request_id, p_price, now())
   ON CONFLICT (user_id, request_id) DO NOTHING
   RETURNING id INTO v_claimed_id;
 
   IF v_claimed_id IS NULL THEN
-    -- 已被处理或正在处理：等待对方提交后返回同一结果
     SELECT item_id, balance_after, stars_after, case_quantity_after
       INTO v_event_item_id, v_event_balance_after, v_event_stars_after, v_event_case_quantity_after
-    FROM public.chest_open_events
+    FROM chest_open_events
     WHERE user_id = p_user_id AND request_id = p_request_id
     FOR UPDATE;
 
@@ -424,9 +426,8 @@ BEGIN
     );
   END IF;
 
-  -- 1) 锁定用户行，防止并发扣余额
   SELECT balance, stars INTO v_user_balance, v_user_stars
-  FROM public.users
+  FROM users
   WHERE id = p_user_id
   FOR UPDATE;
 
@@ -438,9 +439,8 @@ BEGIN
     RAISE EXCEPTION 'Insufficient balance';
   END IF;
 
-  -- 2) 锁定用户宝箱行，防止并发扣箱
   SELECT quantity INTO v_case_quantity
-  FROM public.user_cases
+  FROM user_cases
   WHERE user_id = p_user_id AND case_id = p_chest_id
   FOR UPDATE;
 
@@ -448,44 +448,39 @@ BEGIN
     RAISE EXCEPTION 'Not enough chests';
   END IF;
 
-  -- 3) 扣余额
-  UPDATE public.users
+  UPDATE users
   SET balance = balance - p_price
   WHERE id = p_user_id;
 
-  -- 4) 扣宝箱
-  UPDATE public.user_cases
+  UPDATE user_cases
   SET quantity = quantity - 1, updated_at = now()
   WHERE user_id = p_user_id AND case_id = p_chest_id;
 
-  -- 5) 发放物品（并发安全）
   SELECT id INTO v_user_item_id
-  FROM public.user_items
+  FROM user_items
   WHERE user_id = p_user_id AND item_id = p_item_id
   FOR UPDATE;
 
   IF v_user_item_id IS NOT NULL THEN
-    UPDATE public.user_items
+    UPDATE user_items
     SET quantity = quantity + 1, updated_at = now()
     WHERE id = v_user_item_id;
   ELSE
-    INSERT INTO public.user_items (user_id, item_id, quantity, created_at, updated_at)
+    INSERT INTO user_items (user_id, item_id, quantity, created_at, updated_at)
     VALUES (p_user_id, p_item_id, 1, now(), now())
     ON CONFLICT (user_id, item_id)
-    DO UPDATE SET quantity = public.user_items.quantity + 1, updated_at = now();
+    DO UPDATE SET quantity = user_items.quantity + 1, updated_at = now();
   END IF;
 
-  -- 6) 读取扣减后的结果（同事务一致）
   SELECT balance, stars INTO v_event_balance_after, v_event_stars_after
-  FROM public.users
+  FROM users
   WHERE id = p_user_id;
 
   SELECT quantity INTO v_event_case_quantity_after
-  FROM public.user_cases
+  FROM user_cases
   WHERE user_id = p_user_id AND case_id = p_chest_id;
 
-  -- 7) 写入事件结果，确保幂等 key 对应唯一奖品与资产结果
-  UPDATE public.chest_open_events
+  UPDATE chest_open_events
   SET
     item_id = p_item_id,
     balance_before = v_user_balance,
