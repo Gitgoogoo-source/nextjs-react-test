@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Package } from 'lucide-react';
+import { Package, Leaf } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
 import { useChestStore } from '@/store/useChestStore';
@@ -279,7 +279,10 @@ export default function ChestView() {
             className="flex-1 py-4 rounded-xl font-bold text-base text-zinc-900 bg-[#f5f0e8] hover:bg-[#ede5d5] transition-colors shadow disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             <span>单开</span>
-            <span className="text-sm">🔑{price}</span>
+            <span className="flex items-center gap-0.5 text-sm text-green-700">
+              <Leaf className="w-3.5 h-3.5 fill-green-600 text-green-600" />
+              {price}
+            </span>
           </button>
 
           {/* 十连开按钮（深色） */}
@@ -293,7 +296,10 @@ export default function ChestView() {
             ) : (
               <>
                 <span>十连开</span>
-                <span className="bg-white/20 rounded-full px-2 py-0.5 text-xs font-bold">🔑{price * 10}</span>
+                <span className="flex items-center gap-0.5 bg-white/20 rounded-full px-2 py-0.5 text-xs font-bold">
+                  <Leaf className="w-3 h-3 fill-green-300 text-green-300" />
+                  {price * 10}
+                </span>
               </>
             )}
           </button>
