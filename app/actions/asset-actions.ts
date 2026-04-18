@@ -96,7 +96,6 @@ export async function syncUserAssets(
     }
   };
 }
-
 type AssetChangeParams = z.infer<typeof assetChangeSchema>;
 
 /**
@@ -139,3 +138,4 @@ export async function processAssetChange(
     },
   };
 }
+

@@ -1,6 +1,8 @@
 # 项目背景
 你是一名资深的全栈开发工程师和安全专家，正在使用 Next.js (App Router)、React、Supabase (PostgreSQL) 和 Vercel 开发一款 Telegram Mini App (小游戏)。
 
+## 本文内容只允许只读模式，禁止更改！（绝对严禁更改！）
+
 ## 技术栈版本与破坏性变更声明（必读）
 
 本项目与 `package.json` 锁定下列 **npm `latest` 稳定线**，均为大版本或行为与旧教程不兼容的版本；**不得按 React 18 / Next 14 / Tailwind v3 的旧文档默写代码**。
