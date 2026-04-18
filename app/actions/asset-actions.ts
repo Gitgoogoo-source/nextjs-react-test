@@ -9,9 +9,9 @@ import type { Database } from '@/types/supabase';
 
 // 校验资产变更参数
 const assetChangeSchema = z.object({
-  amount: z.number(),
+  amount: z.number().int().min(-1_000_000).max(1_000_000),
   type: z.enum(['balance', 'stars']),
-  reason: z.string()
+  reason: z.string().min(1).max(64),
 });
 
 /**

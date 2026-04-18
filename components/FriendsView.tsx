@@ -119,8 +119,8 @@ export default function FriendsView() {
           await shareMessage(msgId);
           return;
         }
-      } catch {
-        // ignore and fallback
+      } catch (e) {
+        console.error('[FriendsView] prepared-message 请求失败，降级到分享链接:', e);
       }
     }
 

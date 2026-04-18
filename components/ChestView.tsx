@@ -1,207 +1,66 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence, useMotionValue, useTransform, useMotionTemplate, MotionValue, useMotionValueEvent } from 'framer-motion';
-import { Package, Sparkles, Crown, ArrowLeft } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Package } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
-import { telegramHapticImpact, telegramHapticNotify } from '@/lib/telegram-haptics';
 import { useUserStore } from '@/store/useUserStore';
-import { useChestStore, type ChestListItem } from '@/store/useChestStore';
-import { useCollectionStore } from '@/store/useCollectionStore';
+import { useChestStore } from '@/store/useChestStore';
+import { useOpenChest, CHEST_ICON_MAP, type UserChestInstance } from '@/hooks/useOpenChest';
+import { RoulettePanel } from './chest/RoulettePanel';
 
-// 前端不再硬编码价格，价格从数据库通过 API 获取
-// 此配置仅包含静态 UI 属性（颜色、图标等）
-const CHEST_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  normal: Package,
-  rare: Sparkles,
-  exclusive: Crown,
-  legend: Crown,
-};
+const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
-// 用户宝箱实例类型（包含前端渲染需要的完整信息）
-interface UserChestInstance extends ChestListItem {
-  uniqueId: string;
-  icon: React.ComponentType<{ className?: string }>;
+function wrapIndex(idx: number, len: number) {
+  return ((idx % len) + len) % len;
 }
 
-// CSGO 风格的稀有度颜色，修改为玻璃拟态 (Glassmorphism) 风格
-// 说明：掉率已迁移到数据库 case_items(drop_chance)。这里的列表仅用于轮盘“填充展示”。
-const MOCK_PRIZES = [
-  { id: 1, name: '军规级鸭子', color: 'bg-blue-500/20', border: 'border-blue-400/50', shadow: 'shadow-blue-500/50', rarity: 'Mil-Spec', hex: '#3b82f6' },
-  { id: 2, name: '受限级鸭子', color: 'bg-purple-500/20', border: 'border-purple-400/50', shadow: 'shadow-purple-500/50', rarity: 'Restricted', hex: '#a855f7' },
-  { id: 3, name: '保密级鸭子', color: 'bg-pink-500/20', border: 'border-pink-400/50', shadow: 'shadow-pink-500/50', rarity: 'Classified', hex: '#ec4899' },
-  { id: 4, name: '隐秘级鸭子', color: 'bg-red-500/20', border: 'border-red-400/50', shadow: 'shadow-red-500/50', rarity: 'Covert', hex: '#ef4444' },
-  { id: 5, name: '罕见级鸭子', color: 'bg-yellow-500/20', border: 'border-yellow-400/50', shadow: 'shadow-yellow-500/50', rarity: 'Rare Special', hex: '#eab308' },
-];
-
-type PrizeViewItem = {
-  id?: string; // uuid（来自数据库，仅展示用）
-  name: string;
-  color: string;
-  border: string;
-  rarity: string;
-  hex: string;
-};
-
-const ROULETTE_FILLERS: PrizeViewItem[] = MOCK_PRIZES.map((p) => ({
-  name: p.name,
-  color: p.color,
-  border: p.border,
-  rarity: p.rarity,
-  hex: p.hex,
-}));
-
-// 播放短促的滴答声
-const playTickSound = () => {
-  try {
-    const w = window as unknown as { webkitAudioContext?: typeof AudioContext } & Window;
-    const AudioContextCtor = window.AudioContext || w.webkitAudioContext;
-    if (!AudioContextCtor) return;
-    const ctx = new AudioContextCtor();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    
-    osc.type = 'sine';
-    // 频率设置得高一点，时间极短，产生类似 tick 的声音
-    osc.frequency.setValueAtTime(800, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
-    
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
-    
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.05);
-  } catch (e) {
-    console.error('Audio play failed', e);
-  }
-};
-
-// 触发 Telegram 震动（经 @telegram-apps/sdk-react）
-const triggerHaptic = () => {
-  try {
-    telegramHapticImpact('light');
-  } catch (e) {
-    console.error('Haptic feedback failed', e);
-  }
-};
-
-// 单个轮盘物品组件
-const RouletteItem = ({ item, idx, x, itemWidth }: { item: PrizeViewItem, idx: number, x: MotionValue<number>, itemWidth: number }) => {
-  // 当前物品的中心点偏移量
-  const centerOffset = (idx * itemWidth) + (itemWidth / 2);
-  
-  // 当容器的 x 移动到 -centerOffset 时，该物品正好在屏幕正中央
-  const range = [-centerOffset - itemWidth, -centerOffset, -centerOffset + itemWidth];
-  
-  // 缩放：在正中央时放大到 1.15 倍
-  const scale = useTransform(x, range, [1, 1.15, 1]);
-  // 亮度：在正中央时变亮
-  const brightness = useTransform(x, range, [0.5, 1.2, 0.5]);
-  // z-index：在正中央时置顶
-  const zIndex = useTransform(x, range, [0, 10, 0]);
-  // 边框发光透明度
-  const glowOpacity = useTransform(x, range, [0, 1, 0]);
-
-  const filter = useMotionTemplate`brightness(${brightness})`;
-
-  return (
-    <motion.div 
-      style={{ scale, filter, zIndex }}
-      className={`flex-shrink-0 w-[96px] h-24 rounded-lg border-2 ${item.border} ${item.color} backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden transition-shadow duration-100`}
-    >
-      {/* 稀有物品的背景流光效果 (Radial Gradient) */}
-      {['Classified', 'Covert', 'Rare Special'].includes(item.rarity) && (
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.4)_0%,transparent_70%)] animate-pulse" />
-      )}
-      
-      {/* 指针划过时的边框闪烁高亮 */}
-      <motion.div 
-        style={{ opacity: glowOpacity }}
-        className="absolute inset-0 border-4 border-white rounded-lg pointer-events-none mix-blend-overlay"
-      />
-
-      {/* 物品内部的光泽 */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50" />
-      
-      <Package className="w-8 h-8 text-white/90 mb-1 drop-shadow-md relative z-10" />
-      <span className="text-xs font-bold text-white drop-shadow-md relative z-10">{item.name}</span>
-    </motion.div>
-  );
-};
+function getRelativeOffset(idx: number, current: number, len: number) {
+  const raw = idx - current;
+  const half = Math.floor(len / 2);
+  let offset = raw;
+  if (offset > half) offset -= len;
+  if (offset < -half) offset += len;
+  return offset;
+}
 
 export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isOpening, setIsOpening] = useState(false);
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
-  const setAssetsFromServer = useUserStore((s) => s.setAssetsFromServer);
   const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce } = useChestStore();
-  
-  // 用户的宝箱列表
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
 
-  // 轮盘状态
-  const [rouletteItems, setRouletteItems] = useState<PrizeViewItem[]>([]);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [showResult, setShowResult] = useState(false);
-  const [wonItem, setWonItem] = useState<PrizeViewItem | null>(null);
-  
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [targetX, setTargetX] = useState(0);
-  
-  // 追踪容器的 X 轴位移，用于计算物品的高亮和触发音效
-  const x = useMotionValue(0);
-  const lastTickIndex = useRef(-1);
+  const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
+  const {
+    isOpening, isSpinning, showResult, wonItem,
+    rouletteItems, targetX, x, containerRef,
+    actionError,
+    startOpen, resetState, handleSpinComplete,
+  } = useOpenChest(currentChest);
 
-  // 登录后只加载一次；切换 Tab 重新 mount 也不会重复请求
   useEffect(() => {
-    if (isSyncing) return;
-    if (!initData) return;
-    if (hasLoaded) return;
-    // 兜底：即使某些情况下登录流程没触发 loadOnce，这里也能保证只请求一次
+    if (isSyncing || !initData || hasLoaded) return;
     loadOnce(initData).catch((e) => console.error(e));
   }, [isSyncing, initData, hasLoaded, loadOnce]);
 
-  // 将“带数量的宝箱类型列表”展开成“单个宝箱实例列表”供 UI 滑动展示
   useEffect(() => {
-    const generatedChests: UserChestInstance[] = [];
+    const instances: UserChestInstance[] = [];
     if (Array.isArray(chests) && chests.length > 0) {
-      chests.forEach((chestData) => {
-        if (chestData.quantity > 0) {
-          for (let i = 0; i < chestData.quantity; i++) {
-            generatedChests.push({
-              ...chestData,
-              quantity: 1, // 单个实例
-              uniqueId: `${chestData.case_id}-${i}`,
-              icon: CHEST_ICON_MAP[chestData.case_key] || Package,
-            });
-          }
+      chests.forEach((chest) => {
+        for (let i = 0; i < chest.quantity; i++) {
+          instances.push({
+            ...chest,
+            quantity: 1,
+            uniqueId: `${chest.case_id}-${i}`,
+            icon: CHEST_ICON_MAP[chest.case_key] || Package,
+          });
         }
       });
     }
-    setUserChests(generatedChests);
-    setCurrentIndex((prev) => Math.max(0, Math.min(prev, generatedChests.length - 1)));
+    setUserChests(instances);
+    setCurrentIndex((prev) => Math.max(0, Math.min(prev, instances.length - 1)));
   }, [chests]);
-
-  // 监听 X 轴变化，触发音效和震动
-  useMotionValueEvent(x, "change", (latest) => {
-    if (!isSpinning) return;
-    
-    const itemWidth = 100; // 每个物品的宽度 + gap
-    // 计算当前指针指向的物品索引
-    // 因为 x 是负数，所以取绝对值
-    const currentPointerIndex = Math.floor(Math.abs(latest) / itemWidth);
-    
-    if (currentPointerIndex !== lastTickIndex.current) {
-      lastTickIndex.current = currentPointerIndex;
-      playTickSound();
-      triggerHaptic();
-    }
-  });
 
   const handleNext = () => {
     if (isOpening || userChests.length === 0) return;
@@ -213,282 +72,19 @@ export default function ChestView() {
     setCurrentIndex((prev) => (prev - 1 + userChests.length) % userChests.length);
   };
 
-  // 当前选中的宝箱，价格来自后端 API
-  const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
-
-  const startOpen = async () => {
-    if (isOpening || !currentChest) return;
-    if (!initData) {
-      alert('未获取到 Telegram 登录信息，请重新进入');
-      return;
-    }
-    setIsOpening(true);
-    setShowResult(false);
-    setIsSpinning(false);
-    x.set(0); 
-    lastTickIndex.current = -1;
-    
-    try {
-      const uuidv4 = () => {
-        // 兼容 Telegram WebView：优先使用 randomUUID，否则用 getRandomValues 生成 RFC4122 v4
-        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-        const c = crypto as unknown as Crypto | undefined;
-        if (!c || typeof c.getRandomValues !== 'function') {
-          throw new Error('浏览器不支持安全随机数生成');
-        }
-        const bytes = new Uint8Array(16);
-        c.getRandomValues(bytes);
-        bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-        bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
-        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-      };
-
-      const requestId = uuidv4();
-
-      // 点击后立刻向服务端提交开箱申请（前端不做结算/不传结果）
-      const response = await fetch('/api/chest/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // 只传递宝箱 UUID（cases.id），后端会从数据库读取价格与类型进行验证
-        body: JSON.stringify({ chestId: currentChest.case_id, requestId, initData })
-      });
-      
-      const body = (await response.json()) as {
-        success?: boolean;
-        error?: string;
-        data?: {
-          wonItem: PrizeViewItem;
-          randomOffset: number;
-          userAssets?: { balance: number; stars: number };
-        };
-      };
-
-      if (!response.ok || !body.success || !body.data) {
-        throw new Error(body.error || '开启宝箱失败');
-      }
-
-      const { wonItem: wonItemFromServer, randomOffset, userAssets } = body.data;
-
-      // 关键修复：开箱成功后，立即用服务端回传的最新资产刷新顶部 UI
-      // 资产只接受服务端回传（DB 真实值），前端不做任何结算
-      if (userAssets) setAssetsFromServer(userAssets);
-
-      // 静默同步最新资产/宝箱数量：在开箱动画期间后台完成，避免回主界面出现“同步数据中/加载宝箱中”
-      // 仍然只通过 initData 让服务端验签后返回可信数据
-      void useChestStore.getState().refreshSilent(initData);
-      // 开箱成功后静默刷新藏品列表（只在此处与登录处刷新，切换页面不重复请求）
-      // 只传 initData，服务端验签后读取 user_items/ items 返回可信数据
-      void useCollectionStore.getState().refreshSilent(initData);
-      void useUserStore.getState().syncSilent(initData);
-      
-      // 生成 50 个物品，前 44 个随机展示
-      const items: PrizeViewItem[] = Array.from({ length: 50 }).map((_, i) => {
-        if (i === 44) {
-          // 第 45 个 (索引 44) 是中奖物品
-          return wonItemFromServer;
-        }
-        // 其他随机填充
-        const rand = Math.random() * 100;
-        if (rand < 50) return ROULETTE_FILLERS[0];
-        if (rand < 75) return ROULETTE_FILLERS[1];
-        if (rand < 90) return ROULETTE_FILLERS[2];
-        if (rand < 98) return ROULETTE_FILLERS[3];
-        return ROULETTE_FILLERS[4];
-      });
-      
-      const winIndex = 44;
-      const winner = items[winIndex];
-      
-      setRouletteItems(items);
-      setWonItem(winner);
-
-      setTimeout(() => {
-        if (containerRef.current) {
-          const itemWidth = 100; 
-          const centerOffset = (winIndex * itemWidth) + (itemWidth / 2);
-          // 使用后端返回的随机偏移量
-          const finalX = -centerOffset + randomOffset;
-          
-          setTargetX(finalX);
-          setIsSpinning(true);
-        }
-      }, 100);
-      
-    } catch (error: unknown) {
-      console.error('Error:', error);
-      setIsOpening(false);
-      const message =
-        typeof error === 'object' && error !== null && 'message' in error
-          ? String((error as { message?: unknown }).message || '开启宝箱失败，请重试')
-          : '开启宝箱失败，请重试';
-      alert(message);
-    }
-  };
-
-  const handleSpinComplete = () => {
-    setShowResult(true);
-    
-    // 最终中奖时的强烈震动
-    try {
-      telegramHapticNotify('success');
-    } catch {}
-    
-    if (wonItem) {
-      const duration = 3000;
-      const end = Date.now() + duration;
-
-      const frame = () => {
-        confetti({
-          particleCount: 5,
-          angle: 60,
-          spread: 55,
-          origin: { x: 0, y: 0.8 },
-          colors: [wonItem.hex, '#ffffff']
-        });
-        confetti({
-          particleCount: 5,
-          angle: 120,
-          spread: 55,
-          origin: { x: 1, y: 0.8 },
-          colors: [wonItem.hex, '#ffffff']
-        });
-
-        if (Date.now() < end) {
-          requestAnimationFrame(frame);
-        }
-      };
-      
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: [wonItem.hex, '#ffffff', '#facc15']
-      });
-      
-      frame();
-    }
-  };
-
-  const resetState = () => {
-    setIsOpening(false);
-    setShowResult(false);
-    setIsSpinning(false);
-    setRouletteItems([]);
-    x.set(0);
-    lastTickIndex.current = -1;
-  };
-
-  const wrapIndex = (idx: number, len: number) => ((idx % len) + len) % len;
-  const getRelativeOffset = (idx: number, current: number, len: number) => {
-    // 让 offset 落在 [-floor(len/2), floor(len/2)]，实现“环形”相邻关系
-    const raw = idx - current;
-    const half = Math.floor(len / 2);
-    let offset = raw;
-    if (offset > half) offset -= len;
-    if (offset < -half) offset += len;
-    return offset;
-  };
-
-  const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
-
   if (isOpening) {
     return (
-      // 移动端全屏适配
-      <div className="fixed inset-0 w-screen h-screen flex flex-col items-center justify-center bg-background overflow-hidden z-50">
-        {/* 工业/科技风背景 */}
-        <div className="absolute inset-0 opacity-20 pointer-events-none">
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#4f4f4f2e_1px,transparent_1px),linear-gradient(to_bottom,#4f4f4f2e_1px,transparent_1px)] bg-[size:14px_24px]" />
-          <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-40 bg-tg-secondary-bg shadow-[0_0_50px_rgba(0,0,0,0.8)] border-y border-foreground/10" />
-        </div>
-
-        {/* 顶部返回按钮 */}
-        {!isSpinning && !showResult && (
-          <button 
-            onClick={resetState}
-            className="absolute left-4 text-tg-hint hover:text-foreground flex items-center gap-2 z-20 mt-4 top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)]"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            <span>返回</span>
-          </button>
-        )}
-
-        <div className="relative w-full max-w-md mx-auto z-10" ref={containerRef}>
-          {/* 红色发光指针 */}
-          <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-red-500 -translate-x-1/2 z-20 shadow-[0_0_15px_rgba(239,68,68,1)]" />
-          
-          {/* 指针上下的小三角形 */}
-          <div className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1 w-4 h-4 bg-red-500 rotate-45 z-20" />
-          <div className="absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1 w-4 h-4 bg-red-500 rotate-45 z-20" />
-
-          {/* 滚动容器 */}
-          <div 
-            className="overflow-hidden h-32 relative w-full"
-            style={{ 
-              maskImage: 'linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 20%, black 80%, transparent 100%)'
-            }}
-          >
-            <motion.div 
-              className="flex items-center h-full gap-1 px-[50%]"
-              style={{ x }}
-              initial={{ x: 0 }}
-              animate={{ x: isSpinning ? targetX : 0 }}
-              transition={{ 
-                duration: 7, 
-                ease: [0.13, 0.99, 0.22, 1], // 极强重量感的缓动曲线
-                onComplete: handleSpinComplete
-              }}
-            >
-              {rouletteItems.map((item, idx) => (
-                <RouletteItem 
-                  key={idx} 
-                  item={item} 
-                  idx={idx} 
-                  x={x} 
-                  itemWidth={100} 
-                />
-              ))}
-            </motion.div>
-          </div>
-        </div>
-
-        {/* 结果展示 */}
-        <AnimatePresence>
-          {showResult && wonItem && (
-            <motion.div 
-              initial={{ opacity: 0, y: 50, scale: 0.5 }}
-              animate={{ opacity: 1, y: 0, scale: 1.2 }}
-              transition={{ type: 'spring', bounce: 0.5, duration: 0.8 }}
-              className="absolute bottom-1/4 flex flex-col items-center z-30"
-            >
-              {/* 物品背后的光晕 */}
-              <div className={`absolute inset-0 blur-3xl opacity-40 ${wonItem.color.replace('/20', '')} rounded-full scale-150 -z-10`} />
-              
-              <div className="text-zinc-300 mb-2 font-medium tracking-widest text-sm uppercase">获得物品</div>
-              
-              <div className={`relative w-32 h-32 rounded-2xl border-4 ${wonItem.border.replace('/50', '')} ${wonItem.color} backdrop-blur-md flex flex-col items-center justify-center shadow-2xl mb-6 overflow-hidden`}>
-                {['Classified', 'Covert', 'Rare Special'].includes(wonItem.rarity) && (
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.6)_0%,transparent_70%)] animate-spin-slow" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-50" />
-                <Package className="w-16 h-16 text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] relative z-10" />
-              </div>
-
-              <div className={`text-3xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-400 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] mb-8`}>
-                {wonItem.name}
-              </div>
-              
-              <button 
-                onClick={resetState}
-                className="px-10 py-4 rounded-xl font-bold text-white bg-zinc-800/80 backdrop-blur-md hover:bg-zinc-700/80 border border-zinc-600 transition-colors shadow-lg active:scale-95"
-              >
-                收下物品
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      <RoulettePanel
+        isSpinning={isSpinning}
+        showResult={showResult}
+        wonItem={wonItem}
+        rouletteItems={rouletteItems}
+        targetX={targetX}
+        x={x}
+        containerRef={containerRef}
+        onSpinComplete={handleSpinComplete}
+        onClose={resetState}
+      />
     );
   }
 
@@ -528,7 +124,6 @@ export default function ChestView() {
 
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-between px-4 py-6 overflow-hidden">
-      {/* 背景光效 */}
       <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`} />
 
       <div className="text-center z-10 shrink-0 mt-2">
@@ -536,14 +131,18 @@ export default function ChestView() {
         <p className="text-gray-400 text-sm">滑动或点击切换不同类型的宝箱</p>
       </div>
 
-      {/* 宝箱展示区 */}
+      {actionError ? (
+        <div className="shrink-0 z-10 w-full max-w-sm mb-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          {actionError}
+        </div>
+      ) : null}
+
+      {/* 宝箱展示区（Cover Flow 样式） */}
       <div className="relative w-full h-64 flex items-center justify-center z-10 shrink-0 my-auto">
-        {/* 固定选中边框：不跟随滑动，只做选中强调 */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-30">
           <div className="w-48 h-56 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
         </div>
 
-        {/* 核心滑动区（宝箱动） */}
         <motion.div
           className="relative w-full h-full flex items-center justify-center"
           style={{ touchAction: 'pan-y' }}
@@ -551,10 +150,10 @@ export default function ChestView() {
           dragDirectionLock
           dragConstraints={{ left: 0, right: 0 }}
           dragElastic={0.2}
-          onDragEnd={(e, { offset, velocity }) => {
-            const swipePower = Math.abs(offset.x) * velocity.x;
-            if (swipePower < -8000) handleNext();
-            else if (swipePower > 8000) handlePrev();
+          onDragEnd={(_, { offset, velocity }) => {
+            const power = Math.abs(offset.x) * velocity.x;
+            if (power < -8000) handleNext();
+            else if (power > 8000) handlePrev();
           }}
         >
           {userChests.map((chest, idx) => {
@@ -562,18 +161,10 @@ export default function ChestView() {
             const isCenter = offset === 0;
             const absOffset = Math.abs(offset);
             const isVisible = absOffset <= 2;
-
-            // 让用户在选中的宝箱两边还能看到 2 个缩小宝箱
             const opacity = isCenter ? 1 : absOffset === 1 ? 0.55 : absOffset === 2 ? 0.28 : 0;
-            const scale = isCenter ? 1 : absOffset === 1 ? 0.78 : absOffset === 2 ? 0.62 : 0.62;
+            const scale = isCenter ? 1 : absOffset === 1 ? 0.78 : 0.62;
             const zIndex = isCenter ? 20 : absOffset === 1 ? 10 : absOffset === 2 ? 5 : 0;
-
-            // Cover Flow：左右偏移 + 轻微 3D 视差（rotateY + perspective）
-            const step = 85;
-            const translateX = `${offset * step}%`;
             const rotateY = offset === 0 ? 0 : Math.max(-55, Math.min(55, -offset * 22));
-            const translateZ = isCenter ? 50 : absOffset === 1 ? 10 : 0;
-
             const ChestIcon = chest.icon;
 
             return (
@@ -581,35 +172,16 @@ export default function ChestView() {
                 key={chest.uniqueId}
                 type="button"
                 onClick={() => {
-                  if (isOpening) return;
-                  if (idx === currentIndex) return;
+                  if (isOpening || idx === currentIndex) return;
                   setCurrentIndex(wrapIndex(idx, userChests.length));
                 }}
                 className="absolute w-48 h-56 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 backdrop-blur-md flex flex-col items-center justify-center p-6 shadow-xl transform-gpu will-change-transform focus:outline-none"
-                style={{
-                  zIndex,
-                  transformPerspective: 1200,
-                  pointerEvents: isVisible ? 'auto' : 'none',
-                }}
+                style={{ zIndex, transformPerspective: 1200, pointerEvents: isVisible ? 'auto' : 'none' }}
                 initial={false}
-                animate={{
-                  opacity,
-                  scale,
-                  x: translateX,
-                  rotateY,
-                  z: translateZ,
-                  transition: spring,
-                }}
+                animate={{ opacity, scale, x: `${offset * 85}%`, rotateY, z: isCenter ? 50 : absOffset === 1 ? 10 : 0, transition: spring }}
                 whileTap={{ scale: isCenter ? 0.98 : scale }}
               >
-                {/* 保留居中选中时的蓝色发光 + 玻璃拟态背景（原有 shadow 逻辑） */}
-                <div
-                  className={[
-                    'absolute inset-0 rounded-2xl pointer-events-none',
-                    isCenter ? chest.shadow : '',
-                  ].join(' ')}
-                />
-
+                <div className={['absolute inset-0 rounded-2xl pointer-events-none', isCenter ? chest.shadow : ''].join(' ')} />
                 <div className={`w-20 h-20 rounded-xl bg-gradient-to-br ${chest.color} flex items-center justify-center mb-4 shadow-inner`}>
                   <ChestIcon className="w-10 h-10 text-white" />
                 </div>
@@ -620,28 +192,16 @@ export default function ChestView() {
           })}
         </motion.div>
 
-        {/* 左右切换按钮 */}
         {userChests.length > 1 && (
           <>
-            <button 
-              onClick={handlePrev}
-              className="absolute left-0 sm:left-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
-            >
-              &#10094;
-            </button>
-            <button 
-              onClick={handleNext}
-              className="absolute right-0 sm:right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40"
-            >
-              &#10095;
-            </button>
+            <button onClick={handlePrev} className="absolute left-0 sm:left-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40">&#10094;</button>
+            <button onClick={handleNext} className="absolute right-0 sm:right-4 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40">&#10095;</button>
           </>
         )}
       </div>
 
-      {/* 底部操作区 */}
+      {/* 底部价格与开箱按钮 */}
       <div className="flex flex-col items-center gap-3 z-10 w-full max-w-[280px] shrink-0 mb-4">
-        {/* 底部文字：只能淡入淡出，不能跟着滑动 */}
         <div className="relative h-11 w-full flex items-center justify-center">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -658,8 +218,8 @@ export default function ChestView() {
             </motion.div>
           </AnimatePresence>
         </div>
-        
-        <button 
+
+        <button
           onClick={startOpen}
           disabled={isOpening}
           className={`w-full py-4 rounded-xl font-bold text-lg text-white bg-gradient-to-r ${currentChest?.color || ''} hover:opacity-90 transition-opacity shadow-lg ${currentChest?.shadow || ''} disabled:opacity-50 disabled:cursor-not-allowed`}

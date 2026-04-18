@@ -108,8 +108,8 @@ export async function syncTelegramUser(initData: string): Promise<ActionResult<T
         });
       }
     } catch (e) {
-      // 不阻塞登录主流程
-      console.warn('Invite processing skipped:', e);
+      // 邀请奖励失败不阻塞登录主流程，但需记录以便排查
+      console.error('[syncTelegramUser] 邀请奖励 RPC 失败:', e);
     }
 
     revalidateGameRoot();

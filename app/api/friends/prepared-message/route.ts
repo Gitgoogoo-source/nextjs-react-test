@@ -12,6 +12,14 @@ const preparedMessageBodySchema = z.object({
   initData: z.string().min(1, '缺少 initData'),
 });
 
+/** Telegram Bot API: savePreparedInlineMessage success payload */
+const telegramSavePreparedInlineMessageOkSchema = z.object({
+  ok: z.literal(true),
+  result: z.object({
+    id: z.string().min(1),
+  }),
+});
+
 type PreparedMessageResponse = {
   msgId: string;
 };
@@ -124,18 +132,18 @@ export async function POST(request: Request) {
       cache: 'no-store',
     });
 
-    const tgJson = (await tgRes.json().catch(() => null)) as unknown;
-    if (!tgRes.ok || !tgJson || typeof tgJson !== 'object') {
+    const tgJson: unknown = await tgRes.json().catch(() => null);
+    if (!tgRes.ok || tgJson === null || typeof tgJson !== 'object') {
       console.error('telegram savePreparedInlineMessage failed:', tgRes.status, tgJson);
       return jsonActionErr('Telegram API 调用失败', 502);
     }
 
-    const ok = (tgJson as { ok?: unknown }).ok === true;
-    const msgId = ok ? (tgJson as { result?: { id?: unknown } }).result?.id : null;
-    if (!ok || typeof msgId !== 'string' || msgId.length === 0) {
+    const tgParsed = telegramSavePreparedInlineMessageOkSchema.safeParse(tgJson);
+    if (!tgParsed.success) {
       console.error('telegram savePreparedInlineMessage bad response:', tgJson);
       return jsonActionErr('Telegram API 调用失败', 502);
     }
+    const msgId = tgParsed.data.result.id;
 
     // 5) 写缓存（幂等：UNIQUE(user_id, kind)）
     const { error: upsertErr } = await supabase.from('user_prepared_messages').upsert(
