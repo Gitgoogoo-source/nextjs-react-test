@@ -379,6 +379,10 @@ $function$
 | **SECURITY DEFINER** | `false` |
 | **行为摘要** | `chest_open_events (user_id, request_id)` 幂等抢占；扣余额与 `user_cases`；发放/合并 `user_items`；写回事件中的前后资产与箱数；重复请求返回已存结果。失败时 `RAISE EXCEPTION`（如余额不足、无箱、用户不存在）。 |
 
+> **注意**：线上存在两个重载版本：
+> - `p_price bigint` 版本（当前主版本，见下方定义）
+> - `p_price integer` 版本（旧版，保留兼容性，使用 `USING ERRCODE` 返回 `99001`/`99002` 错误码）
+
 **源定义：**
 
 ```sql
@@ -514,7 +518,17 @@ $function$
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | `false` |
-| **行为摘要** | `purchase_orders (user_id, request_id)` 抢占订单；校验用户与 `shop_products`；按货币扣 `balance`/`stars`；按 `product_type` 发放 `user_cases` 或 `user_items`；更新订单成功与资产快照。`p_quantity` 须在 `1..100`，否则 `RAISE EXCEPTION`。 |
+| **行为摘要** | `purchase_orders (user_id, request_id)` 抢占订单；校验用户与 `shop_products`；按货币扣 `balance`/`stars`；按 `product_type` 发放 `user_cases` 或 `user_items`；更新订单成功与资产快照。`p_quantity` 须在 `1..100`，否则 `RAISE EXCEPTION`（SQLSTATE: `P0004`）。 |
+
+> **错误码说明**：
+> - `P0001` - 余额不足 (Insufficient balance)
+> - `P0002` - Star 不足 (Insufficient stars)
+> - `P0003` - 商品不存在或未激活 (Product not found or inactive)
+> - `P0004` - 数量无效 (Invalid quantity)
+> - `P0005` - 用户不存在 (User not found)
+> - `P0006` - 无效总价 (Invalid total price)
+> - `P0007` - 不支持的货币 (Unsupported currency)
+> - `P0008` - 不支持的商品类型 (Unsupported product_type)
 
 **源定义：**
 

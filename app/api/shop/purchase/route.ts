@@ -64,17 +64,18 @@ export async function POST(request: Request) {
     });
 
     if (rpcError) {
-      const msg = rpcError.message || '';
-      if (msg.includes('Insufficient balance')) {
+      const code = (rpcError as { code?: string }).code;
+      // SQLSTATE 错误代码映射（PostgreSQL custom: P0001-P0004）
+      if (code === 'P0001') {
         return jsonActionErr('叶子不足', 400);
       }
-      if (msg.includes('Insufficient stars')) {
+      if (code === 'P0002') {
         return jsonActionErr('星星不足', 400);
       }
-      if (msg.includes('Product not found')) {
+      if (code === 'P0003') {
         return jsonActionErr('商品不存在或已下架', 404);
       }
-      if (msg.includes('Invalid quantity')) {
+      if (code === 'P0004') {
         return jsonActionErr('购买数量不合法', 400);
       }
       console.error('shop_purchase rpc error:', rpcError);
