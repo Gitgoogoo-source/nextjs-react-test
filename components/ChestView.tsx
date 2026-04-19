@@ -6,7 +6,7 @@ import { Package, Leaf } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
 import { useUserStore } from '@/store/useUserStore';
 import { useChestStore } from '@/store/useChestStore';
-import { useOpenChest, CHEST_ICON_MAP, type UserChestInstance, type OpenMode } from '@/hooks/useOpenChest';
+import { useOpenChest, CHEST_ICON_MAP, type UserChestInstance } from '@/hooks/useOpenChest';
 import { RoulettePanel } from './chest/RoulettePanel';
 import { ShopSection } from './ShopView';
 
@@ -32,7 +32,6 @@ export default function ChestView() {
   const userBalance = useUserStore((s) => s.balance);
   const { chests, isLoading: isLoadingChests, error: chestLoadError, hasLoaded, loadOnce } = useChestStore();
   const [userChests, setUserChests] = useState<UserChestInstance[]>([]);
-  const [activeMode, setActiveMode] = useState<OpenMode>('single');
 
   const currentChest = userChests.length > 0 ? userChests[currentIndex] : null;
   const {
@@ -150,27 +149,9 @@ export default function ChestView() {
               className={`absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`}
             />
 
-            <div className="flex items-start justify-between w-full z-10 shrink-0">
+            <div className="flex items-start w-full z-10 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-white">当前宝箱</h2>
-              </div>
-
-              <div className="flex items-center gap-1 bg-white/10 rounded-full p-1 border border-white/15 backdrop-blur-sm">
-                {(['single', 'batch'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setActiveMode(m)}
-                    disabled={isOpening || isOpeningPending}
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-                      activeMode === m
-                        ? 'bg-white text-zinc-900 shadow-sm'
-                        : 'text-zinc-400 hover:text-white'
-                    } disabled:opacity-40`}
-                  >
-                    {m === 'single' ? '单开' : '十连'}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -276,21 +257,21 @@ export default function ChestView() {
             <div className="z-10 mx-auto mt-3 flex w-full max-w-[320px] shrink-0 flex-col items-center gap-2">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
-                  key={`${currentChest?.case_id}-${activeMode}`}
+                  key={currentChest?.case_id}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1, transition: { duration: 0.18 } }}
                   exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                  className="flex items-center gap-2 text-xs font-medium text-zinc-400"
+                  className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-medium text-zinc-400"
                 >
-                  {activeMode === 'single' ? (
-                    <span>
-                      单次消耗 <span className="text-green-400 font-bold">{price}</span> 叶子
-                    </span>
-                  ) : (
-                    <span>
-                      十连消耗 <span className="text-green-400 font-bold">{price * 10}</span> 叶子
-                    </span>
-                  )}
+                  <span>
+                    单次消耗 <span className="text-green-400 font-bold">{price}</span> 叶子
+                  </span>
+                  <span className="text-zinc-600" aria-hidden>
+                    ·
+                  </span>
+                  <span>
+                    十连消耗 <span className="text-green-400 font-bold">{price * 10}</span> 叶子
+                  </span>
                 </motion.div>
               </AnimatePresence>
 
