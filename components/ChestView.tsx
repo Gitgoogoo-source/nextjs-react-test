@@ -60,21 +60,20 @@ export default function ChestView() {
   }, [isSyncing, initData, hasLoaded, loadOnce]);
 
   useEffect(() => {
-    const instances: UserChestInstance[] = [];
+    // 每种 case_id 一行已由后端聚合 quantity；UI 只渲染一种宝箱一张卡，用数量角标表示库存，勿按 quantity 展开成多张重复卡
+    const byType: UserChestInstance[] = [];
     if (Array.isArray(chests) && chests.length > 0) {
       chests.forEach((chest) => {
-        for (let i = 0; i < chest.quantity; i++) {
-          instances.push({
-            ...chest,
-            quantity: chest.quantity,
-            uniqueId: `${chest.case_id}-${i}`,
-            icon: CHEST_ICON_MAP[chest.case_key] || Package,
-          });
-        }
+        byType.push({
+          ...chest,
+          quantity: chest.quantity,
+          uniqueId: chest.case_id,
+          icon: CHEST_ICON_MAP[chest.case_key] || Package,
+        });
       });
     }
-    setUserChests(instances);
-    setCurrentIndex((prev) => Math.max(0, Math.min(prev, instances.length - 1)));
+    setUserChests(byType);
+    setCurrentIndex((prev) => Math.max(0, Math.min(prev, byType.length - 1)));
   }, [chests]);
 
   const handleNext = () => {
@@ -231,14 +230,21 @@ export default function ChestView() {
                       whileTap={{ scale: isCenter ? 0.98 : scale }}
                     >
                       <div className={['absolute inset-0 rounded-2xl pointer-events-none', isCenter ? chest.shadow : ''].join(' ')} />
-                      <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${chest.color} flex items-center justify-center mb-2 shadow-inner`}>
-                        <ChestIcon className="w-8 h-8 text-white" />
+                      <div className="relative w-16 h-16 mb-2">
+                        <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${chest.color} flex items-center justify-center shadow-inner`}>
+                          <ChestIcon className="w-8 h-8 text-white" />
+                        </div>
+                        {chest.quantity > 1 ? (
+                          <span className="absolute -top-1 -right-1 min-w-[1.25rem] px-1 py-0.5 rounded-full bg-zinc-900/90 border border-white/25 text-[10px] font-bold text-white text-center leading-none shadow">
+                            ×{chest.quantity}
+                          </span>
+                        ) : null}
                       </div>
                       <h3 className="text-base font-bold text-white mb-0.5 line-clamp-1">{chest.name}</h3>
                       <p className="text-[10px] text-gray-300 text-center line-clamp-2 px-1">{chest.description}</p>
                       {isCenter && (
                         <p className="text-[10px] text-zinc-400 mt-1">
-                          剩余次数 {currentChestQuantity}/10
+                          库存 {currentChestQuantity} 个
                         </p>
                       )}
                     </motion.button>
