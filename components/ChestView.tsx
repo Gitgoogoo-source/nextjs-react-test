@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Package, Leaf } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
@@ -24,6 +24,8 @@ function getRelativeOffset(idx: number, current: number, len: number) {
   if (offset < -half) offset += len;
   return offset;
 }
+
+const CHEST_UI_SCALE_MAX = 1.42;
 
 export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -94,6 +96,35 @@ export default function ChestView() {
   const canSingle = currentChestQuantity >= 1 && bal >= price;
   const canBatch = currentChestQuantity >= 1 && bal >= price * 10;
 
+  /** 开箱主体（轮盘 + 按钮）所在舞台：用于测量可用高度并按比例放大，吃掉与商城之间的空隙 */
+  const chestStageRef = useRef<HTMLDivElement>(null);
+  const chestMeasureRef = useRef<HTMLDivElement>(null);
+  const [chestUiScale, setChestUiScale] = useState(1);
+
+  const updateChestUiScale = useCallback(() => {
+    const stage = chestStageRef.current;
+    const measure = chestMeasureRef.current;
+    if (!stage || !measure) return;
+    const avail = stage.clientHeight;
+    const natural = measure.offsetHeight;
+    if (avail < 48 || natural < 48) return;
+    const next = Math.min(CHEST_UI_SCALE_MAX, Math.max(1, (avail - 8) / natural));
+    setChestUiScale((prev) => (Math.abs(prev - next) < 0.02 ? prev : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    const stage = chestStageRef.current;
+    const measure = chestMeasureRef.current;
+    if (!stage) return;
+    updateChestUiScale();
+    const ro = new ResizeObserver(() => {
+      updateChestUiScale();
+    });
+    ro.observe(stage);
+    if (measure) ro.observe(measure);
+    return () => ro.disconnect();
+  }, [updateChestUiScale, userChests.length, currentChest?.case_id, isLoadingChests, isSyncing, actionError]);
+
   if (isOpening) {
     return (
       <RoulettePanel
@@ -114,16 +145,16 @@ export default function ChestView() {
   }
 
   return (
-    // min-h-full：至少撑满主内容区高度，便于按 2:1 分配；内容更高时整块变长由外层滚动
-    <div className="flex min-h-full min-w-0 w-full flex-1 flex-col">
-      {/* 开箱区域：占主内容区（顶栏与底栏之间）高度的约 2/3 */}
-      <section className="relative flex flex-[2_1_0%] flex-col border-b border-white/10">
+    // h-full + min-h-full：在顶栏与底栏之间的可视区域内撑满高度，便于 flex 2:1 真正生效；更长内容由外层滚动
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col">
+      {/* 开箱区域：约占主内容区高度的 2/3；内层 flex-1 吃满，避免大块留白 */}
+      <section className="relative flex min-h-0 flex-[2_1_0%] flex-col overflow-x-visible overflow-y-visible border-b border-white/10">
         {isLoadingChests || isSyncing ? (
-          <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8">
             <div className="text-white text-lg animate-pulse">加载宝箱中...</div>
           </div>
         ) : chestLoadError ? (
-          <div className="flex flex-1 flex-col items-center justify-center px-4 py-8 text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
             <h2 className="text-lg font-bold text-white mb-1">加载失败</h2>
             <p className="text-zinc-400 text-sm mb-4">{chestLoadError}</p>
@@ -136,7 +167,7 @@ export default function ChestView() {
             </button>
           </div>
         ) : userChests.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center px-4 py-8 text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
             <h2 className="text-xl font-bold text-white mb-1">暂无宝箱</h2>
             <p className="text-zinc-400 text-sm max-w-[280px]">
@@ -144,177 +175,195 @@ export default function ChestView() {
             </p>
           </div>
         ) : (
-          <div className="relative flex flex-col px-4 pt-3 pb-5">
+          <div className="relative flex min-h-0 flex-1 flex-col px-4 pt-3 pb-3">
             <div
-              className={`absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`}
+              className={`pointer-events-none absolute top-[28%] left-1/2 h-[min(14rem,42vmin)] w-[min(14rem,42vmin)] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`}
             />
 
-            <div className="flex items-start w-full z-10 shrink-0">
+            <div className="relative z-10 flex w-full shrink-0 items-start">
               <div>
                 <h2 className="text-xl font-bold text-white">当前宝箱</h2>
               </div>
             </div>
 
             {actionError ? (
-              <div className="shrink-0 z-10 w-full max-w-sm mt-1 mb-1 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              <div className="relative z-10 mt-1 mb-1 w-full max-w-sm shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
                 {actionError}
               </div>
             ) : null}
 
-            <div className="relative z-10 my-2 flex min-h-[160px] w-full max-w-md shrink-0 items-center justify-center sm:min-h-[200px]">
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-30">
-                <div className="w-40 h-48 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
-              </div>
-
-              <motion.div
-                className="relative w-full h-full flex items-center justify-center"
-                style={{ touchAction: 'pan-y' }}
-                drag="x"
-                dragDirectionLock
-                dragConstraints={{ left: 0, right: 0 }}
-                dragElastic={0.2}
-                onDragEnd={(_, { offset, velocity }) => {
-                  const power = Math.abs(offset.x) * velocity.x;
-                  if (power < -8000) handleNext();
-                  else if (power > 8000) handlePrev();
+            <div
+              ref={chestStageRef}
+              className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-visible py-1"
+            >
+              <div
+                className="w-full max-w-md origin-center will-change-transform"
+                style={{
+                  transform: `scale(${chestUiScale})`,
                 }}
               >
-                {userChests.map((chest, idx) => {
-                  const offset = getRelativeOffset(idx, currentIndex, userChests.length);
-                  const isCenter = offset === 0;
-                  const absOffset = Math.abs(offset);
-                  const isVisible = absOffset <= 2;
-                  const opacity = isCenter ? 1 : absOffset === 1 ? 0.55 : absOffset === 2 ? 0.28 : 0;
-                  const scale = isCenter ? 1 : absOffset === 1 ? 0.78 : 0.62;
-                  const zIndex = isCenter ? 20 : absOffset === 1 ? 10 : absOffset === 2 ? 5 : 0;
-                  const rotateY = offset === 0 ? 0 : Math.max(-55, Math.min(55, -offset * 22));
-                  const ChestIcon = chest.icon;
+                <div ref={chestMeasureRef} className="flex w-full max-w-md flex-col items-center">
+                  <div className="relative z-10 my-2 flex min-h-[min(10rem,28svh)] w-full max-w-md shrink-0 items-center justify-center sm:min-h-[min(12rem,30svh)]">
+                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                      <div className="h-48 w-40 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
+                    </div>
 
-                  return (
-                    <motion.button
-                      key={chest.uniqueId}
-                      type="button"
-                      onClick={() => {
-                        if (isOpening || isOpeningPending || idx === currentIndex) return;
-                        setCurrentIndex(wrapIndex(idx, userChests.length));
+                    <motion.div
+                      className="relative flex h-full w-full items-center justify-center"
+                      style={{ touchAction: 'pan-y' }}
+                      drag="x"
+                      dragDirectionLock
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0.2}
+                      onDragEnd={(_, { offset, velocity }) => {
+                        const power = Math.abs(offset.x) * velocity.x;
+                        if (power < -8000) handleNext();
+                        else if (power > 8000) handlePrev();
                       }}
-                      className="absolute w-40 h-48 rounded-2xl bg-gradient-to-b from-white/10 to-white/5 backdrop-blur-md flex flex-col items-center justify-center p-4 shadow-xl transform-gpu will-change-transform focus:outline-none"
-                      style={{ zIndex, transformPerspective: 1200, pointerEvents: isVisible ? 'auto' : 'none' }}
-                      initial={false}
-                      animate={{
-                        opacity,
-                        scale,
-                        x: `${offset * 85}%`,
-                        rotateY,
-                        z: isCenter ? 50 : absOffset === 1 ? 10 : 0,
-                        transition: spring,
-                      }}
-                      whileTap={{ scale: isCenter ? 0.98 : scale }}
                     >
-                      <div className={['absolute inset-0 rounded-2xl pointer-events-none', isCenter ? chest.shadow : ''].join(' ')} />
-                      <div className="relative w-16 h-16 mb-2">
-                        <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${chest.color} flex items-center justify-center shadow-inner`}>
-                          <ChestIcon className="w-8 h-8 text-white" />
-                        </div>
-                        {chest.quantity > 1 ? (
-                          <span className="absolute -top-1 -right-1 min-w-[1.25rem] px-1 py-0.5 rounded-full bg-zinc-900/90 border border-white/25 text-[10px] font-bold text-white text-center leading-none shadow">
-                            ×{chest.quantity}
-                          </span>
-                        ) : null}
-                      </div>
-                      <h3 className="text-base font-bold text-white mb-0.5 line-clamp-1">{chest.name}</h3>
-                      <p className="text-[10px] text-gray-300 text-center line-clamp-2 px-1">{chest.description}</p>
-                      {isCenter && (
-                        <p className="text-[10px] text-zinc-400 mt-1">
-                          库存 {currentChestQuantity} 个
-                        </p>
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </motion.div>
+                      {userChests.map((chest, idx) => {
+                        const offset = getRelativeOffset(idx, currentIndex, userChests.length);
+                        const isCenter = offset === 0;
+                        const absOffset = Math.abs(offset);
+                        const isVisible = absOffset <= 2;
+                        const opacity = isCenter ? 1 : absOffset === 1 ? 0.55 : absOffset === 2 ? 0.28 : 0;
+                        const scale = isCenter ? 1 : absOffset === 1 ? 0.78 : 0.62;
+                        const zIndex = isCenter ? 20 : absOffset === 1 ? 10 : absOffset === 2 ? 5 : 0;
+                        const rotateY = offset === 0 ? 0 : Math.max(-55, Math.min(55, -offset * 22));
+                        const ChestIcon = chest.icon;
 
-              {userChests.length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={handlePrev}
-                    className="absolute left-0 w-9 h-9 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40 text-sm"
-                  >
-                    &#10094;
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    className="absolute right-0 w-9 h-9 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors z-40 text-sm"
-                  >
-                    &#10095;
-                  </button>
-                </>
-              )}
-            </div>
+                        return (
+                          <motion.button
+                            key={chest.uniqueId}
+                            type="button"
+                            onClick={() => {
+                              if (isOpening || isOpeningPending || idx === currentIndex) return;
+                              setCurrentIndex(wrapIndex(idx, userChests.length));
+                            }}
+                            className="absolute flex h-48 w-40 flex-col items-center justify-center rounded-2xl bg-gradient-to-b from-white/10 to-white/5 p-4 shadow-xl backdrop-blur-md transform-gpu will-change-transform focus:outline-none"
+                            style={{ zIndex, transformPerspective: 1200, pointerEvents: isVisible ? 'auto' : 'none' }}
+                            initial={false}
+                            animate={{
+                              opacity,
+                              scale,
+                              x: `${offset * 85}%`,
+                              rotateY,
+                              z: isCenter ? 50 : absOffset === 1 ? 10 : 0,
+                              transition: spring,
+                            }}
+                            whileTap={{ scale: isCenter ? 0.98 : scale }}
+                          >
+                            <div
+                              className={['pointer-events-none absolute inset-0 rounded-2xl', isCenter ? chest.shadow : ''].join(
+                                ' '
+                              )}
+                            />
+                            <div className="relative mb-2 h-16 w-16">
+                              <div
+                                className={`flex h-16 w-16 items-center justify-center rounded-xl bg-gradient-to-br ${chest.color} shadow-inner`}
+                              >
+                                <ChestIcon className="h-8 w-8 text-white" />
+                              </div>
+                              {chest.quantity > 1 ? (
+                                <span className="absolute -top-1 -right-1 min-w-[1.25rem] rounded-full border border-white/25 bg-zinc-900/90 px-1 py-0.5 text-center text-[10px] font-bold leading-none text-white shadow">
+                                  ×{chest.quantity}
+                                </span>
+                              ) : null}
+                            </div>
+                            <h3 className="mb-0.5 line-clamp-1 text-base font-bold text-white">{chest.name}</h3>
+                            <p className="line-clamp-2 px-1 text-center text-[10px] text-gray-300">{chest.description}</p>
+                            {isCenter && (
+                              <p className="mt-1 text-[10px] text-zinc-400">库存 {currentChestQuantity} 个</p>
+                            )}
+                          </motion.button>
+                        );
+                      })}
+                    </motion.div>
 
-            <div className="z-10 mx-auto mt-3 flex w-full max-w-[320px] shrink-0 flex-col items-center gap-2">
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={currentChest?.case_id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1, transition: { duration: 0.18 } }}
-                  exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                  className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-medium text-zinc-400"
-                >
-                  <span>
-                    单次消耗 <span className="text-green-400 font-bold">{price}</span> 叶子
-                  </span>
-                  <span className="text-zinc-600" aria-hidden>
-                    ·
-                  </span>
-                  <span>
-                    十连消耗 <span className="text-green-400 font-bold">{price * 10}</span> 叶子
-                  </span>
-                </motion.div>
-              </AnimatePresence>
+                    {userChests.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handlePrev}
+                          className="absolute left-0 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-sm text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+                        >
+                          &#10094;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleNext}
+                          className="absolute right-0 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-sm text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+                        >
+                          &#10095;
+                        </button>
+                      </>
+                    )}
+                  </div>
 
-              <div className="flex gap-2 w-full">
-                <button
-                  type="button"
-                  onClick={() => startOpen('single')}
-                  disabled={isOpening || isOpeningPending || !canSingle}
-                  className="flex-1 py-3 rounded-xl font-bold text-sm text-zinc-900 bg-[#f5f0e8] hover:bg-[#ede5d5] transition-colors shadow disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                >
-                  <span>单开</span>
-                  <span className="flex items-center gap-0.5 text-xs text-green-700">
-                    <Leaf className="w-3 h-3 fill-green-600 text-green-600" />
-                    {price}
-                  </span>
-                </button>
+                  <div className="z-10 mx-auto mt-2 flex w-full max-w-[320px] shrink-0 flex-col items-center gap-2">
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.div
+                        key={currentChest?.case_id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1, transition: { duration: 0.18 } }}
+                        exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-medium text-zinc-400"
+                      >
+                        <span>
+                          单次消耗 <span className="font-bold text-green-400">{price}</span> 叶子
+                        </span>
+                        <span className="text-zinc-600" aria-hidden>
+                          ·
+                        </span>
+                        <span>
+                          十连消耗 <span className="font-bold text-green-400">{price * 10}</span> 叶子
+                        </span>
+                      </motion.div>
+                    </AnimatePresence>
 
-                <button
-                  type="button"
-                  onClick={() => startOpen('batch')}
-                  disabled={isOpening || isOpeningPending || !canBatch}
-                  className={`flex-1 py-3 rounded-xl font-bold text-sm text-white transition-colors shadow disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1 bg-gradient-to-r ${currentChest?.color || 'from-zinc-700 to-zinc-900'} hover:opacity-90`}
-                >
-                  {isOpeningPending ? (
-                    <span className="animate-pulse">开启中...</span>
-                  ) : (
-                    <>
-                      <span>十连开</span>
-                      <span className="flex items-center gap-0.5 bg-white/20 rounded-full px-1.5 py-0.5 text-[10px] font-bold">
-                        <Leaf className="w-2.5 h-2.5 fill-green-300 text-green-300" />
-                        {price * 10}
-                      </span>
-                    </>
-                  )}
-                </button>
+                    <div className="flex w-full gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startOpen('single')}
+                        disabled={isOpening || isOpeningPending || !canSingle}
+                        className="flex flex-1 items-center justify-center gap-1 rounded-xl bg-[#f5f0e8] py-3 text-sm font-bold text-zinc-900 shadow transition-colors hover:bg-[#ede5d5] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span>单开</span>
+                        <span className="flex items-center gap-0.5 text-xs text-green-700">
+                          <Leaf className="h-3 w-3 fill-green-600 text-green-600" />
+                          {price}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => startOpen('batch')}
+                        disabled={isOpening || isOpeningPending || !canBatch}
+                        className={`flex flex-1 items-center justify-center gap-1 rounded-xl bg-gradient-to-r py-3 text-sm font-bold text-white shadow transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${currentChest?.color || 'from-zinc-700 to-zinc-900'}`}
+                      >
+                        {isOpeningPending ? (
+                          <span className="animate-pulse">开启中...</span>
+                        ) : (
+                          <>
+                            <span>十连开</span>
+                            <span className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold">
+                              <Leaf className="h-2.5 w-2.5 fill-green-300 text-green-300" />
+                              {price * 10}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         )}
       </section>
 
-      {/* 商城区域：占主内容区高度的约 1/3，与开箱区同一滚动容器内同步移动 */}
-      <section className="flex flex-[1_1_0%] flex-col">
+      {/* 商城区域：约占主内容区高度的 1/3；min-h-0 避免 flex 子项撑破比例 */}
+      <section className="flex min-h-0 flex-[1_1_0%] flex-col">
         <ShopSection />
       </section>
     </div>
