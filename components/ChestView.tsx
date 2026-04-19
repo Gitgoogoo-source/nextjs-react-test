@@ -115,15 +115,15 @@ export default function ChestView() {
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col min-h-0 overflow-hidden">
-      {/* 上半：开箱 */}
-      <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden border-b border-white/10">
+    <div className="flex w-full min-h-full flex-col">
+      {/* 开箱区域：至少占视口高度约 2/3，内容超出时整块随页面滚动 */}
+      <section className="relative flex min-h-[66.666dvh] flex-col border-b border-white/10">
         {isLoadingChests || isSyncing ? (
-          <div className="flex-1 flex items-center justify-center px-4">
+          <div className="flex flex-1 min-h-[40dvh] items-center justify-center px-4 py-8">
             <div className="text-white text-lg animate-pulse">加载宝箱中...</div>
           </div>
         ) : chestLoadError ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-4 text-center">
+          <div className="flex flex-1 min-h-[40dvh] flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
             <h2 className="text-lg font-bold text-white mb-1">加载失败</h2>
             <p className="text-zinc-400 text-sm mb-4">{chestLoadError}</p>
@@ -136,7 +136,7 @@ export default function ChestView() {
             </button>
           </div>
         ) : userChests.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center px-4 text-center min-h-0">
+          <div className="flex flex-1 min-h-[40dvh] flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
             <h2 className="text-xl font-bold text-white mb-1">暂无宝箱</h2>
             <p className="text-zinc-400 text-sm max-w-[280px]">
@@ -144,7 +144,7 @@ export default function ChestView() {
             </p>
           </div>
         ) : (
-          <div className="relative flex flex-col flex-1 min-h-0 px-4 pt-3 pb-3 overflow-hidden">
+          <div className="relative flex flex-col px-4 pt-3 pb-5">
             <div
               className={`absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 bg-gradient-to-br ${currentChest?.color || ''} rounded-full blur-3xl opacity-20 transition-colors duration-500 transform-gpu will-change-transform`}
             />
@@ -179,7 +179,7 @@ export default function ChestView() {
               </div>
             ) : null}
 
-            <div className="relative w-full flex-1 min-h-[140px] max-h-[220px] flex items-center justify-center z-10 my-1">
+            <div className="relative z-10 my-2 flex min-h-[160px] w-full max-w-md shrink-0 items-center justify-center sm:min-h-[200px]">
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-30">
                 <div className="w-40 h-48 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
               </div>
@@ -272,7 +272,7 @@ export default function ChestView() {
               )}
             </div>
 
-            <div className="flex flex-col items-center gap-2 z-10 w-full max-w-[320px] shrink-0 mx-auto mt-auto">
+            <div className="z-10 mx-auto mt-3 flex w-full max-w-[320px] shrink-0 flex-col items-center gap-2">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
                   key={`${currentChest?.case_id}-${activeMode}`}
@@ -329,12 +329,12 @@ export default function ChestView() {
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* 下半：商城（4 列网格，内部滚动） */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* 商城区域：至少占视口高度约 1/3，与开箱区同一滚动容器内同步移动 */}
+      <section className="flex min-h-[33.334dvh] flex-col">
         <ShopSection />
-      </div>
+      </section>
     </div>
   );
 }
