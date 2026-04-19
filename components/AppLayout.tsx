@@ -114,52 +114,72 @@ export default function AppLayout() {
         )}
       </div>
 
-      {/* 底部导航栏 */}
-      <div className="bg-tg-secondary-bg border-t border-foreground/5 px-2 py-3 pb-safe">
-        <div className="flex justify-around items-center">
+      {/* 底部浮动导航：圆角胶囊 + 半透明底 + 细透明边 + 毛玻璃 */}
+      <div className="shrink-0 px-3 pt-1 pb-safe">
+        <nav
+          className={[
+            'mx-auto flex max-w-full items-stretch justify-around gap-0.5 rounded-full px-1 py-1.5',
+            'border border-foreground/18 bg-foreground/[0.07] shadow-[0_10px_40px_rgba(0,0,0,0.35)]',
+            'backdrop-blur-xl backdrop-saturate-150',
+            '[box-shadow:inset_0_1px_0_rgba(255,255,255,0.06)]',
+          ].join(' ')}
+          aria-label="主导航"
+        >
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
-            
+
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`relative flex flex-col items-center justify-center w-16 h-14 rounded-2xl transition-all duration-200 ${
-                  isActive ? 'text-foreground' : 'text-tg-hint hover:text-foreground/80'
-                }`}
+                className={[
+                  'relative flex min-w-0 flex-1 flex-col items-center justify-center rounded-full py-1.5 transition-all duration-200',
+                  isActive ? 'text-foreground' : 'text-tg-hint hover:text-foreground/85',
+                ].join(' ')}
               >
-                {/* 选中状态的背景高亮 */}
                 {isActive && (
-                  <div className="absolute inset-0 bg-foreground/5 rounded-xl" />
-                )}
-                
-                <div className="relative mb-1">
-                  <Icon 
-                    className={`w-6 h-6 transition-colors ${
-                      isActive ? 'text-foreground' : 'text-tg-hint'
-                    }`} 
+                  <div
+                    className="absolute inset-x-1 inset-y-0.5 rounded-full bg-foreground/[0.09] ring-1 ring-foreground/10"
+                    aria-hidden
                   />
-                  
-                  {/* 徽章 */}
-                  {tab.badge && (
-                    <div className="absolute -top-2 -right-3 bg-red-500 px-1.5 py-0.5 text-center text-app-caption font-bold text-white min-w-[18px] rounded-full border-[1.5px] border-tg-secondary-bg shadow-sm">
-                      {tab.badge > 99 ? '99+' : tab.badge}
-                    </div>
-                  )}
+                )}
+
+                <div className="relative z-[1] flex flex-col items-center gap-0.5">
+                  <div className="relative">
+                    <Icon
+                      className={[
+                        'h-6 w-6 transition-colors',
+                        isActive ? 'text-foreground' : 'text-tg-hint',
+                      ].join(' ')}
+                    />
+                    {isActive && (
+                      <span
+                        className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]"
+                        aria-hidden
+                      />
+                    )}
+                    {tab.badge ? (
+                      <div className="absolute -top-2 -right-3 min-w-[18px] rounded-full border-[1.5px] border-foreground/25 bg-red-500 px-1.5 py-0.5 text-center text-app-caption font-bold text-white shadow-sm">
+                        {tab.badge > 99 ? '99+' : tab.badge}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <span
+                    className={[
+                      'text-app-caption font-medium transition-colors',
+                      isActive ? 'text-foreground' : 'text-tg-hint',
+                    ].join(' ')}
+                  >
+                    {tab.label}
+                  </span>
                 </div>
-                
-                <span
-                  className={`text-app-caption font-medium transition-colors ${
-                    isActive ? 'text-foreground' : 'text-tg-hint'
-                  }`}
-                >
-                  {tab.label}
-                </span>
               </button>
             );
           })}
-        </div>
+        </nav>
       </div>
     </div>
   );
