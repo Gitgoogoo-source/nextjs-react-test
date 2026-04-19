@@ -14,6 +14,7 @@ const RARITY_LABEL: Record<string, string> = {
   'Rare Special': '罕见级',
 };
 
+
 export default function CollectionView() {
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
