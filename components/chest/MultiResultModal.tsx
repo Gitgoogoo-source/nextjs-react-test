@@ -27,11 +27,11 @@ export function MultiResultModal({ showResult, wonItems, onClose }: MultiResultM
     <AnimatePresence>
       {showResult && wonItems.length > 0 && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.92 }}
-          transition={{ type: 'spring', bounce: 0.3, duration: 0.6 }}
-          className="absolute inset-0 flex flex-col items-center justify-center z-30 px-3"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 12 }}
+          transition={{ type: 'spring', bounce: 0.28, duration: 0.55 }}
+          className="absolute inset-0 z-30 flex flex-col items-center justify-center px-3"
         >
           {/* 高稀有物品光晕背景 */}
           {hasRare && highlight && (
@@ -40,9 +40,7 @@ export function MultiResultModal({ showResult, wonItems, onClose }: MultiResultM
             />
           )}
 
-          <div className="text-zinc-300 mb-3 font-medium tracking-widest text-sm uppercase">
-            十连开结果
-          </div>
+          <div className="mb-3 text-app-caption font-medium uppercase tracking-widest text-zinc-300">十连开结果</div>
 
           {/* 2×5 网格 */}
           <div className="grid grid-cols-5 gap-2 w-full max-w-xs">
@@ -51,17 +49,17 @@ export function MultiResultModal({ showResult, wonItems, onClose }: MultiResultM
               return (
                 <motion.div
                   key={idx}
-                  initial={{ opacity: 0, y: 16, scale: 0.8 }}
-                  animate={{ opacity: 1, y: 0, scale: isRare ? 1.05 : 1 }}
-                  transition={{ delay: idx * 0.06, type: 'spring', bounce: 0.4, duration: 0.5 }}
-                  className={`relative flex flex-col items-center justify-center rounded-lg border-2 ${item.border} ${item.color} p-1.5 aspect-square overflow-hidden transform-gpu will-change-transform`}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.06, type: 'spring', bounce: 0.35, duration: 0.48 }}
+                  className={`relative flex aspect-square transform-gpu flex-col items-center justify-center overflow-hidden rounded-lg border-2 p-1.5 will-change-transform ${item.border} ${item.color}`}
                 >
                   {isRare && (
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.35)_0%,transparent_70%)] animate-pulse" />
                   )}
                   <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-40" />
                   <Package className="w-6 h-6 text-white/90 drop-shadow-md relative z-10" />
-                  <span className="text-[9px] font-bold text-white text-center leading-tight mt-0.5 relative z-10 line-clamp-2">
+                  <span className="relative z-10 mt-0.5 line-clamp-2 text-center text-app-caption font-bold leading-tight text-white">
                     {item.name}
                   </span>
                   {isRare && (
@@ -80,11 +78,11 @@ export function MultiResultModal({ showResult, wonItems, onClose }: MultiResultM
               transition={{ delay: 0.7, duration: 0.4 }}
               className="mt-4 flex flex-col items-center"
             >
-              <span className="text-xs text-zinc-400 mb-1">最高稀有</span>
-              <span className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-400">
+              <span className="mb-1 text-app-caption text-zinc-400">最高稀有</span>
+              <span className="bg-gradient-to-b from-white to-zinc-400 bg-clip-text text-center text-app-title font-black text-transparent">
                 {highlight.name}
               </span>
-              <span className="text-xs mt-0.5" style={{ color: highlight.hex }}>
+              <span className="mt-0.5 text-app-caption" style={{ color: highlight.hex }}>
                 {highlight.rarity}
               </span>
             </motion.div>
@@ -95,7 +93,7 @@ export function MultiResultModal({ showResult, wonItems, onClose }: MultiResultM
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9, duration: 0.3 }}
             onClick={onClose}
-            className="mt-5 px-10 py-3 rounded-xl font-bold text-white bg-zinc-800/80 backdrop-blur-md hover:bg-zinc-700/80 border border-zinc-600 transition-colors shadow-lg active:scale-95"
+            className="mt-5 rounded-xl border border-zinc-600 bg-zinc-800/80 px-10 py-3 text-app-title font-bold text-white shadow-lg backdrop-blur-md transition-colors hover:bg-zinc-700/80 active:scale-95"
           >
             收下全部
           </motion.button>

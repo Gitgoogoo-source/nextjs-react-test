@@ -31,7 +31,7 @@ export default function CollectionView() {
   if (isLoading || isSyncing) {
     return (
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="text-white text-lg animate-pulse">加载藏品中...</div>
+        <div className="text-app-heading animate-pulse font-semibold text-white">加载藏品中...</div>
       </div>
     );
   }
@@ -40,8 +40,8 @@ export default function CollectionView() {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
         <Archive className="w-20 h-20 text-zinc-700 mb-4" />
-        <h2 className="text-xl font-bold text-white mb-2">加载失败</h2>
-        <p className="text-zinc-400 text-center mb-6">{error}</p>
+        <h2 className="mb-2 text-app-heading font-bold text-white">加载失败</h2>
+        <p className="mb-6 text-center text-app-body text-zinc-400">{error}</p>
         <button
           onClick={() => window.location.reload()}
           className="px-6 py-3 rounded-xl font-bold text-white bg-zinc-800/80 backdrop-blur-md hover:bg-zinc-700/80 border border-zinc-600 transition-colors shadow-lg active:scale-95"
@@ -56,8 +56,8 @@ export default function CollectionView() {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
         <Archive className="w-24 h-24 text-zinc-700 mb-4" />
-        <h2 className="text-2xl font-bold text-white mb-2">暂无藏品</h2>
-        <p className="text-zinc-400 text-center">去开宝箱获取第一件藏品吧！</p>
+        <h2 className="mb-2 text-app-heading font-bold text-white">暂无藏品</h2>
+        <p className="text-center text-app-body text-zinc-400">去开宝箱获取第一件藏品吧！</p>
       </div>
     );
   }
@@ -65,7 +65,7 @@ export default function CollectionView() {
   return (
     <div className="absolute inset-0 flex flex-col px-4 py-6 overflow-hidden">
       <div className="shrink-0 mb-4">
-        <h2 className="text-2xl font-bold text-white mb-1">我的藏品</h2>
+        <h2 className="mb-1 text-app-heading font-bold text-white">我的藏品</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto pb-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -97,13 +97,13 @@ export default function CollectionView() {
                   <Package className="w-6 h-6 text-white/90" />
                 </div>
 
-                <div className="text-white font-bold leading-snug line-clamp-2">{it.name}</div>
+                <div className="line-clamp-2 font-bold leading-snug text-app-title text-white">{it.name}</div>
 
                 <div className="mt-2 flex items-center justify-between">
-                  <div className="text-[11px] text-gray-300">
+                  <div className="text-app-caption text-gray-300">
                     {RARITY_LABEL[it.rarity] ? `${RARITY_LABEL[it.rarity]} · ${it.rarity}` : it.rarity}
                   </div>
-                  <div className="text-[12px] font-bold text-white bg-black/30 px-2 py-1 rounded-full border border-white/10 tabular-nums">
+                  <div className="rounded-full border border-white/10 bg-black/30 px-2 py-1 text-app-caption font-bold text-white tabular-nums">
                     x{it.quantity}
                   </div>
                 </div>

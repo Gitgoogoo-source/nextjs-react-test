@@ -147,12 +147,12 @@ export function ShopSection() {
       <div className="flex w-full flex-col px-3 pb-2">
         <div className="shrink-0 flex items-center gap-2 mb-2 px-0.5">
           <ShoppingBag className="w-5 h-5 text-white/90" />
-          <h3 className="text-lg font-bold text-white">商城</h3>
+          <h3 className="text-app-heading font-bold text-white">商城</h3>
         </div>
         <div className="flex min-h-[100px] items-center justify-center py-6">
           <div className="flex items-center gap-2 text-white/90">
             <Loader2 className="w-5 h-5 animate-spin" />
-            <span className="text-sm animate-pulse">加载商品中...</span>
+            <span className="text-app-body animate-pulse">加载商品中...</span>
           </div>
         </div>
       </div>
@@ -164,12 +164,12 @@ export function ShopSection() {
       <div className="flex w-full flex-col justify-center px-3 py-4 pb-2">
         <div className="shrink-0 flex items-center gap-2 mb-2 px-0.5">
           <ShoppingBag className="w-5 h-5 text-white/90" />
-          <h3 className="text-lg font-bold text-white">商城</h3>
+          <h3 className="text-app-heading font-bold text-white">商城</h3>
         </div>
         <div className="flex flex-col items-center justify-center text-center px-2 py-4">
           <AlertTriangle className="w-10 h-10 text-zinc-700 mb-2" />
-          <div className="text-white font-semibold text-sm mb-1">未获取到登录信息</div>
-          <div className="text-zinc-500 text-xs">请在 Telegram 内打开小游戏后再购买。</div>
+          <div className="mb-1 text-app-title font-semibold text-white">未获取到登录信息</div>
+          <div className="text-app-caption text-zinc-500">请在 Telegram 内打开小游戏后再购买。</div>
         </div>
       </div>
     );
@@ -181,16 +181,16 @@ export function ShopSection() {
         <div className="shrink-0 flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-white/90" />
-            <h3 className="text-lg font-bold text-white">商城</h3>
+            <h3 className="text-app-heading font-bold text-white">商城</h3>
           </div>
         </div>
         <div className="flex min-h-[120px] flex-col items-center justify-center px-2 py-6 text-center">
           <AlertTriangle className="w-10 h-10 text-zinc-700 mb-2" />
-          <div className="text-white font-semibold text-sm mb-1">加载失败</div>
-          <div className="text-zinc-500 text-xs mb-3">{error}</div>
+          <div className="mb-1 text-app-title font-semibold text-white">加载失败</div>
+          <div className="mb-3 text-app-caption text-zinc-500">{error}</div>
           <button
             onClick={() => initData && refresh(initData)}
-            className="px-4 py-2 rounded-xl font-bold text-sm text-white bg-white/10 hover:bg-white/15 border border-white/10 transition-colors active:scale-95"
+            className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-app-title font-bold text-white transition-colors hover:bg-white/15 active:scale-95"
           >
             重试
           </button>
@@ -204,7 +204,7 @@ export function ShopSection() {
       <div className="shrink-0 flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <ShoppingBag className="w-5 h-5 text-white/90" />
-          <h3 className="text-lg font-bold text-white">商城</h3>
+          <h3 className="text-app-heading font-bold text-white">商城</h3>
         </div>
         <button
           onClick={() => {
@@ -220,7 +220,7 @@ export function ShopSection() {
       </div>
 
       {actionError ? (
-        <div className="shrink-0 mb-2 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-xs text-red-200">
+        <div className="mb-2 shrink-0 rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-app-caption text-red-200">
           {actionError}
         </div>
       ) : null}
@@ -228,8 +228,8 @@ export function ShopSection() {
       {visibleProducts.length === 0 ? (
         <div className="flex min-h-[100px] flex-col items-center justify-center px-2 py-8 text-center">
           <Sparkles className="w-12 h-12 text-zinc-700 mb-2" />
-          <div className="text-white font-semibold text-sm mb-0.5">暂无上架商品</div>
-          <div className="text-zinc-500 text-xs">稍后再来看看吧。</div>
+          <div className="mb-0.5 text-app-title font-semibold text-white">暂无上架商品</div>
+          <div className="text-app-caption text-zinc-500">稍后再来看看吧。</div>
         </div>
       ) : (
         <div className="pb-2">
@@ -252,22 +252,22 @@ export function ShopSection() {
                   <div className="pointer-events-none absolute -top-8 -right-8 w-20 h-20 rounded-full blur-2xl opacity-25 bg-purple-500" />
 
                   <div className="relative z-10 flex flex-col flex-1 min-h-0">
-                    <div className="text-[11px] font-bold text-white leading-snug line-clamp-3 min-h-[2.6rem]">{title}</div>
+                    <div className="line-clamp-3 min-h-[2.6rem] text-app-caption font-bold leading-snug text-white">{title}</div>
                     {desc ? (
-                      <div className="mt-0.5 text-[9px] text-gray-400/90 line-clamp-2 flex-1">{desc}</div>
+                      <div className="mt-0.5 line-clamp-2 flex-1 text-app-caption text-gray-400/90">{desc}</div>
                     ) : null}
 
-                    <div className="mt-auto pt-1.5 space-y-1">
-                      <div className="text-[9px] font-semibold text-white/90 tabular-nums leading-tight">
+                    <div className="mt-auto space-y-1 pt-1.5">
+                      <div className="text-app-caption font-semibold leading-tight text-white/90 tabular-nums">
                         {price.toLocaleString()}
-                        <span className="text-gray-400 font-normal ml-0.5">{currencyLabel(currency)}</span>
+                        <span className="ml-0.5 font-normal text-gray-400">{currencyLabel(currency)}</span>
                       </div>
                       <button
                         type="button"
                         disabled={isPurchasing}
                         onClick={() => void purchase(p.id)}
                         className={[
-                          'w-full py-1 rounded-lg text-[10px] font-bold text-white border transition-colors active:scale-[0.98]',
+                          'w-full rounded-lg border py-1 text-app-caption font-bold text-white transition-colors active:scale-[0.98]',
                           isPurchasing
                             ? 'bg-white/10 border-white/10 opacity-80 cursor-not-allowed'
                             : 'bg-purple-600/85 hover:bg-purple-600 border-purple-400/25',

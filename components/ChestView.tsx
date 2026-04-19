@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Package, Leaf } from 'lucide-react';
 import { useTelegramAuth } from '@/hooks/useTelegramAuth';
@@ -24,8 +24,6 @@ function getRelativeOffset(idx: number, current: number, len: number) {
   if (offset < -half) offset += len;
   return offset;
 }
-
-const CHEST_UI_SCALE_MAX = 1.42;
 
 export default function ChestView() {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -96,35 +94,6 @@ export default function ChestView() {
   const canSingle = currentChestQuantity >= 1 && bal >= price;
   const canBatch = currentChestQuantity >= 1 && bal >= price * 10;
 
-  /** 开箱主体（轮盘 + 按钮）所在舞台：用于测量可用高度并按比例放大，吃掉与商城之间的空隙 */
-  const chestStageRef = useRef<HTMLDivElement>(null);
-  const chestMeasureRef = useRef<HTMLDivElement>(null);
-  const [chestUiScale, setChestUiScale] = useState(1);
-
-  const updateChestUiScale = useCallback(() => {
-    const stage = chestStageRef.current;
-    const measure = chestMeasureRef.current;
-    if (!stage || !measure) return;
-    const avail = stage.clientHeight;
-    const natural = measure.offsetHeight;
-    if (avail < 48 || natural < 48) return;
-    const next = Math.min(CHEST_UI_SCALE_MAX, Math.max(1, (avail - 8) / natural));
-    setChestUiScale((prev) => (Math.abs(prev - next) < 0.02 ? prev : next));
-  }, []);
-
-  useLayoutEffect(() => {
-    const stage = chestStageRef.current;
-    const measure = chestMeasureRef.current;
-    if (!stage) return;
-    updateChestUiScale();
-    const ro = new ResizeObserver(() => {
-      updateChestUiScale();
-    });
-    ro.observe(stage);
-    if (measure) ro.observe(measure);
-    return () => ro.disconnect();
-  }, [updateChestUiScale, userChests.length, currentChest?.case_id, isLoadingChests, isSyncing, actionError]);
-
   if (isOpening) {
     return (
       <RoulettePanel
@@ -151,17 +120,17 @@ export default function ChestView() {
       <section className="relative flex min-h-0 flex-[2_1_0%] flex-col overflow-x-visible overflow-y-visible border-b border-white/10">
         {isLoadingChests || isSyncing ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8">
-            <div className="text-white text-lg animate-pulse">加载宝箱中...</div>
+            <div className="text-app-heading font-semibold text-white animate-pulse">加载宝箱中...</div>
           </div>
         ) : chestLoadError ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
-            <h2 className="text-lg font-bold text-white mb-1">加载失败</h2>
-            <p className="text-zinc-400 text-sm mb-4">{chestLoadError}</p>
+            <h2 className="text-app-heading font-bold text-white mb-1">加载失败</h2>
+            <p className="text-app-body text-zinc-400 mb-4">{chestLoadError}</p>
             <button
               type="button"
               onClick={() => (initData ? void loadOnce(initData) : window.location.reload())}
-              className="px-5 py-2.5 rounded-xl font-bold text-sm text-white bg-zinc-800/80 backdrop-blur-md hover:bg-zinc-700/80 border border-zinc-600 transition-colors shadow-lg active:scale-95"
+              className="rounded-xl border border-zinc-600 bg-zinc-800/80 px-5 py-2.5 text-app-title font-bold text-white shadow-lg backdrop-blur-md transition-colors hover:bg-zinc-700/80 active:scale-95"
             >
               重试
             </button>
@@ -169,8 +138,8 @@ export default function ChestView() {
         ) : userChests.length === 0 ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
-            <h2 className="text-xl font-bold text-white mb-1">暂无宝箱</h2>
-            <p className="text-zinc-400 text-sm max-w-[280px]">
+            <h2 className="text-app-heading font-bold text-white mb-1">暂无宝箱</h2>
+            <p className="text-app-body text-zinc-400 max-w-[280px]">
               您目前没有任何宝箱，可在下方商城购买宝箱与其他道具。
             </p>
           </div>
@@ -182,28 +151,19 @@ export default function ChestView() {
 
             <div className="relative z-10 flex w-full shrink-0 items-start">
               <div>
-                <h2 className="text-xl font-bold text-white">当前宝箱</h2>
+                <h2 className="text-app-heading font-bold text-white">当前宝箱</h2>
               </div>
             </div>
 
             {actionError ? (
-              <div className="relative z-10 mt-1 mb-1 w-full max-w-sm shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              <div className="relative z-10 mt-1 mb-1 w-full max-w-sm shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-app-caption text-red-200">
                 {actionError}
               </div>
             ) : null}
 
-            <div
-              ref={chestStageRef}
-              className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-visible py-1"
-            >
-              <div
-                className="w-full max-w-md origin-center will-change-transform"
-                style={{
-                  transform: `scale(${chestUiScale})`,
-                }}
-              >
-                <div ref={chestMeasureRef} className="flex w-full max-w-md flex-col items-center">
-                  <div className="relative z-10 my-2 flex min-h-[min(10rem,28svh)] w-full max-w-md shrink-0 items-center justify-center sm:min-h-[min(12rem,30svh)]">
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-visible py-1">
+              <div className="flex w-full max-w-md flex-col items-center">
+                <div className="relative z-10 my-2 flex min-h-[min(10rem,28svh)] w-full max-w-md shrink-0 items-center justify-center sm:min-h-[min(12rem,30svh)]">
                     <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                       <div className="h-48 w-40 rounded-2xl border-2 border-white/30 shadow-[0_0_25px_rgba(255,255,255,0.12)]" />
                     </div>
@@ -265,15 +225,15 @@ export default function ChestView() {
                                 <ChestIcon className="h-8 w-8 text-white" />
                               </div>
                               {chest.quantity > 1 ? (
-                                <span className="absolute -top-1 -right-1 min-w-[1.25rem] rounded-full border border-white/25 bg-zinc-900/90 px-1 py-0.5 text-center text-[10px] font-bold leading-none text-white shadow">
+                                <span className="absolute -top-1 -right-1 min-w-[1.25rem] rounded-full border border-white/25 bg-zinc-900/90 px-1 py-0.5 text-center text-app-caption font-bold leading-none text-white shadow">
                                   ×{chest.quantity}
                                 </span>
                               ) : null}
                             </div>
-                            <h3 className="mb-0.5 line-clamp-1 text-base font-bold text-white">{chest.name}</h3>
-                            <p className="line-clamp-2 px-1 text-center text-[10px] text-gray-300">{chest.description}</p>
+                            <h3 className="mb-0.5 line-clamp-1 text-app-title font-bold text-white">{chest.name}</h3>
+                            <p className="line-clamp-2 px-1 text-center text-app-caption text-gray-300">{chest.description}</p>
                             {isCenter && (
-                              <p className="mt-1 text-[10px] text-zinc-400">库存 {currentChestQuantity} 个</p>
+                              <p className="mt-1 text-app-caption text-zinc-400">库存 {currentChestQuantity} 个</p>
                             )}
                           </motion.button>
                         );
@@ -285,14 +245,14 @@ export default function ChestView() {
                         <button
                           type="button"
                           onClick={handlePrev}
-                          className="absolute left-0 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-sm text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+                          className="absolute left-0 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-app-body text-white backdrop-blur-sm transition-colors hover:bg-white/20"
                         >
                           &#10094;
                         </button>
                         <button
                           type="button"
                           onClick={handleNext}
-                          className="absolute right-0 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-sm text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+                          className="absolute right-0 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-app-body text-white backdrop-blur-sm transition-colors hover:bg-white/20"
                         >
                           &#10095;
                         </button>
@@ -307,7 +267,7 @@ export default function ChestView() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1, transition: { duration: 0.18 } }}
                         exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-medium text-zinc-400"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-app-caption font-medium text-zinc-400"
                       >
                         <span>
                           单次消耗 <span className="font-bold text-green-400">{price}</span> 叶子
@@ -326,10 +286,10 @@ export default function ChestView() {
                         type="button"
                         onClick={() => startOpen('single')}
                         disabled={isOpening || isOpeningPending || !canSingle}
-                        className="flex flex-1 items-center justify-center gap-1 rounded-xl bg-[#f5f0e8] py-3 text-sm font-bold text-zinc-900 shadow transition-colors hover:bg-[#ede5d5] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex flex-1 items-center justify-center gap-1 rounded-xl bg-[#f5f0e8] py-3 text-app-title font-bold text-zinc-900 shadow transition-colors hover:bg-[#ede5d5] disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <span>单开</span>
-                        <span className="flex items-center gap-0.5 text-xs text-green-700">
+                        <span className="flex items-center gap-0.5 text-app-caption text-green-700">
                           <Leaf className="h-3 w-3 fill-green-600 text-green-600" />
                           {price}
                         </span>
@@ -339,14 +299,14 @@ export default function ChestView() {
                         type="button"
                         onClick={() => startOpen('batch')}
                         disabled={isOpening || isOpeningPending || !canBatch}
-                        className={`flex flex-1 items-center justify-center gap-1 rounded-xl bg-gradient-to-r py-3 text-sm font-bold text-white shadow transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${currentChest?.color || 'from-zinc-700 to-zinc-900'}`}
+                        className={`flex flex-1 items-center justify-center gap-1 rounded-xl bg-gradient-to-r py-3 text-app-title font-bold text-white shadow transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 ${currentChest?.color || 'from-zinc-700 to-zinc-900'}`}
                       >
                         {isOpeningPending ? (
                           <span className="animate-pulse">开启中...</span>
                         ) : (
                           <>
                             <span>十连开</span>
-                            <span className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold">
+                            <span className="flex items-center gap-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-app-caption font-bold">
                               <Leaf className="h-2.5 w-2.5 fill-green-300 text-green-300" />
                               {price * 10}
                             </span>
@@ -356,7 +316,6 @@ export default function ChestView() {
                     </div>
                   </div>
                 </div>
-              </div>
             </div>
           </div>
         )}

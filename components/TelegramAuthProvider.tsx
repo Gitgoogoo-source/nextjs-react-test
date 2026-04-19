@@ -37,7 +37,7 @@ export function TelegramAuthProvider({ children }: { children: React.ReactNode }
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.5 }}
-            className="text-lg font-semibold tracking-wider uppercase text-tg-hint"
+            className="text-app-heading font-semibold uppercase tracking-wider text-tg-hint"
           >
             正在同步数据...
           </motion.p>
@@ -50,8 +50,8 @@ export function TelegramAuthProvider({ children }: { children: React.ReactNode }
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
         <div className="text-center space-y-4">
-          <p className="text-red-500 font-bold text-xl">同步失败</p>
-          <p className="text-tg-hint">{error}</p>
+          <p className="text-app-heading font-bold text-red-500">同步失败</p>
+          <p className="text-app-body text-tg-hint">{error}</p>
         </div>
       </div>
     );

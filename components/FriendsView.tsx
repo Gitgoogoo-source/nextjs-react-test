@@ -147,11 +147,11 @@ export default function FriendsView() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-white/80" />
-          <h2 className="text-lg font-semibold">好友邀请</h2>
+          <h2 className="text-app-heading font-semibold">好友邀请</h2>
         </div>
         <button
           onClick={fetchSummary}
-          className="flex items-center gap-2 text-xs text-white/70 hover:text-white transition"
+          className="flex items-center gap-2 text-app-caption text-white/70 transition hover:text-white"
           disabled={!initData || loading}
         >
           <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -161,35 +161,35 @@ export default function FriendsView() {
 
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center gap-2 text-white/70 text-xs">
+          <div className="flex items-center gap-2 text-app-caption text-white/70">
             <Users className="w-4 h-4" />
             已邀请
           </div>
-          <div className="mt-2 text-2xl font-bold tabular-nums">
+          <div className="mt-2 text-app-heading font-bold tabular-nums">
             {summary ? summary.invitedCount.toLocaleString() : loading ? '…' : '0'}
           </div>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center gap-2 text-white/70 text-xs">
+          <div className="flex items-center gap-2 text-app-caption text-white/70">
             <Gift className="w-4 h-4" />
             奖励总额
           </div>
-          <div className="mt-2 text-2xl font-bold tabular-nums">
+          <div className="mt-2 text-app-heading font-bold tabular-nums">
             {summary ? summary.rewardTotal.toLocaleString() : loading ? '…' : '0'}
           </div>
         </div>
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent p-4">
-        <div className="text-sm font-medium mb-2">邀请好友一起玩</div>
-        <div className="text-xs text-white/60 mb-4">
+        <div className="mb-2 text-app-body font-medium">邀请好友一起玩</div>
+        <div className="mb-4 text-app-caption text-white/60">
           你的好友通过链接进入小程序后，我们会根据 <span className="text-white/80">startapp 参数</span> 进行邀请归因。
         </div>
 
         <div className="flex gap-2">
           <button
             onClick={onShare}
-            className="flex-1 rounded-xl bg-white text-black font-semibold py-3 text-sm flex items-center justify-center gap-2 hover:bg-white/90 transition"
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-white py-3 text-app-title font-semibold text-black transition hover:bg-white/90"
           >
             <Link2 className="w-4 h-4" />
             分享邀请
@@ -204,16 +204,18 @@ export default function FriendsView() {
         </div>
 
         {!botUsername && (
-          <div className="mt-3 text-xs text-amber-300/90">
-            提示：请在环境变量中配置 <span className="font-mono">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</span>，否则无法生成邀请链接。
+          <div className="mt-3 text-app-caption text-amber-300/90">
+            提示：请在环境变量中配置{' '}
+            <span className="font-mono text-app-caption">NEXT_PUBLIC_TELEGRAM_BOT_USERNAME</span>，否则无法生成邀请链接。
           </div>
         )}
 
-        <div className="mt-2 text-[11px] text-white/45">
-          分享面板优先走 Telegram 原生 <span className="font-mono">shareMessage</span>（服务端生成并缓存 msg_id），失败时自动回退到链接分享。
+        <div className="mt-2 text-app-caption text-white/45">
+          分享面板优先走 Telegram 原生 <span className="font-mono text-app-caption">shareMessage</span>
+          （服务端生成并缓存 msg_id），失败时自动回退到链接分享。
         </div>
 
-        {error && <div className="mt-3 text-xs text-red-400">加载失败：{error}</div>}
+        {error && <div className="mt-3 text-app-caption text-red-400">加载失败：{error}</div>}
       </div>
 
       {toast && (
@@ -221,7 +223,7 @@ export default function FriendsView() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 12 }}
-          className="fixed bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-black/80 px-4 py-2 text-xs text-white border border-white/10 backdrop-blur"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-black/80 px-4 py-2 text-app-caption text-white backdrop-blur"
         >
           {toast}
         </motion.div>

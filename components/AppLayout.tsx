@@ -65,7 +65,7 @@ export default function AppLayout() {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <span className="text-sm font-bold text-foreground">
+              <span className="text-app-body font-bold text-foreground">
                 {user?.first_name?.charAt(0) || 'K'}
               </span>
             )}
@@ -74,7 +74,7 @@ export default function AppLayout() {
           {/* 鸭群 */}
           <div className="flex items-center gap-1.5 bg-foreground/5 rounded-full px-3 py-1.5 border border-foreground/10">
             <Flame className="w-4 h-4 text-tg-hint" />
-            <span className="text-sm font-medium text-foreground">鸭群</span>
+            <span className="text-app-body font-medium text-foreground">鸭群</span>
           </div>
           
           {/* 钱包 */}
@@ -84,7 +84,7 @@ export default function AppLayout() {
         </div>
 
         {/* 右侧：资源信息 - 已修正为实时数据 */}
-        <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
+        <div className="flex items-center gap-2 text-app-heading font-bold tracking-tight">
           <span>{balance.toLocaleString()}</span>
           <div className="flex items-center gap-1">
             <Leaf className="w-5 h-5 text-green-400 fill-green-400" />
@@ -108,7 +108,7 @@ export default function AppLayout() {
         ) : activeTab === 'friends' ? (
           <FriendsView />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-tg-hint font-medium">
+          <div className="absolute inset-0 flex items-center justify-center text-app-body font-medium text-tg-hint">
             {tabs.find(t => t.id === activeTab)?.label} 界面内容区域
           </div>
         )}
@@ -143,15 +143,17 @@ export default function AppLayout() {
                   
                   {/* 徽章 */}
                   {tab.badge && (
-                    <div className="absolute -top-2 -right-3 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-[1.5px] border-tg-secondary-bg shadow-sm">
+                    <div className="absolute -top-2 -right-3 bg-red-500 px-1.5 py-0.5 text-center text-app-caption font-bold text-white min-w-[18px] rounded-full border-[1.5px] border-tg-secondary-bg shadow-sm">
                       {tab.badge > 99 ? '99+' : tab.badge}
                     </div>
                   )}
                 </div>
                 
-                <span className={`text-[10px] font-medium transition-colors ${
-                  isActive ? 'text-foreground' : 'text-tg-hint'
-                }`}>
+                <span
+                  className={`text-app-caption font-medium transition-colors ${
+                    isActive ? 'text-foreground' : 'text-tg-hint'
+                  }`}
+                >
                   {tab.label}
                 </span>
               </button>

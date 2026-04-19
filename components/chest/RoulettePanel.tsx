@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   motion,
   useMotionValue,
@@ -33,19 +33,25 @@ function RouletteItem({ item, idx, x, itemWidth }: RouletteItemProps) {
   const glowOpacity = useTransform(x, range, [0, 1, 0]);
   const filter = useMotionTemplate`brightness(${brightness})`;
 
+  // 背景层单独随焦点 scale/brightness，文字与图标固定字号，避免随 transform 缩放
   return (
-    <motion.div
-      style={{ scale, filter, zIndex }}
-      className={`flex-shrink-0 w-[96px] h-24 rounded-lg border-2 ${item.border} ${item.color} backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden`}
-    >
-      {['Classified', 'Covert', 'Rare Special'].includes(item.rarity) && (
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.4)_0%,transparent_70%)] animate-pulse" />
-      )}
-      <motion.div style={{ opacity: glowOpacity }} className="absolute inset-0 border-4 border-white rounded-lg pointer-events-none mix-blend-overlay" />
-      <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50" />
-      <Package className="w-8 h-8 text-white/90 mb-1 drop-shadow-md relative z-10" />
-      <span className="text-xs font-bold text-white drop-shadow-md relative z-10">{item.name}</span>
-    </motion.div>
+    <div className="relative flex h-24 w-[96px] flex-shrink-0 flex-col items-center justify-center">
+      <motion.div
+        style={{ scale, filter, zIndex }}
+        className={`absolute inset-0 overflow-hidden rounded-lg border-2 ${item.border} ${item.color} backdrop-blur-md`}
+      >
+        {['Classified', 'Covert', 'Rare Special'].includes(item.rarity) && (
+          <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.4)_0%,transparent_70%)]" />
+        )}
+        <motion.div
+          style={{ opacity: glowOpacity }}
+          className="pointer-events-none absolute inset-0 rounded-lg border-4 border-white mix-blend-overlay"
+        />
+        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-50" />
+      </motion.div>
+      <Package className="relative z-10 mb-1 h-8 w-8 text-white/90 drop-shadow-md" />
+      <span className="relative z-10 text-center text-app-caption font-bold text-white drop-shadow-md">{item.name}</span>
+    </div>
   );
 }
 
@@ -173,8 +179,6 @@ export function RoulettePanel({
   onClose,
 }: RoulettePanelProps) {
   const [backReady, setBackReady] = useState(false);
-  const batchInnerRef = useRef<HTMLDivElement>(null);
-  const [batchNaturalH, setBatchNaturalH] = useState(0);
   const batchCompleteRef = useRef(0);
   const batchSpinDoneRef = useRef(false);
 
@@ -184,23 +188,6 @@ export function RoulettePanel({
   }, []);
 
   const spinDuration = mode === 'batch' ? 2.5 : 7;
-
-  useLayoutEffect(() => {
-    if (mode !== 'batch' || !batchInnerRef.current) return;
-    const el = batchInnerRef.current;
-    const update = () => setBatchNaturalH(el.scrollHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    window.addEventListener('resize', update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', update);
-    };
-  }, [mode, batchRouletteStrips, isSpinning]);
-
-  const availH = typeof window !== 'undefined' ? window.innerHeight - 130 : 600;
-  const batchScale = batchNaturalH > 0 ? Math.min(1, availH / batchNaturalH) : 1;
 
   useEffect(() => {
     batchCompleteRef.current = 0;
@@ -229,50 +216,36 @@ export function RoulettePanel({
         <button
           type="button"
           onClick={onClose}
-          className="absolute left-4 text-tg-hint hover:text-foreground flex items-center gap-2 z-20 mt-4 top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)]"
+          className="absolute left-4 top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)] z-20 mt-4 flex items-center gap-2 text-app-body text-tg-hint hover:text-foreground"
         >
-          <ArrowLeft className="w-5 h-5" />
+          <ArrowLeft className="h-5 w-5" />
           <span>返回</span>
         </button>
       )}
 
       {mode === 'batch' && (
-        <div className="absolute top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)] right-4 z-20 text-xs font-bold text-zinc-400 tracking-widest uppercase">
+        <div className="absolute right-4 top-[calc(var(--tg-safe-area-inset-top,0px)+1.5rem)] z-20 text-app-caption font-bold uppercase tracking-widest text-zinc-400">
           十连开
         </div>
       )}
 
       {mode === 'batch' && batchRouletteStrips.length > 0 ? (
         <div
-          className="relative z-10 flex flex-col items-center justify-center w-full max-w-md mx-auto px-2 flex-1 min-h-0 pt-14 pb-36"
+          className="relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col items-center justify-center overflow-y-auto px-2 pb-36 pt-14 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           ref={containerRef}
         >
-          <div
-            className="w-full overflow-hidden flex justify-center"
-            style={{
-              height: batchNaturalH > 0 ? batchNaturalH * batchScale : undefined,
-            }}
-          >
-            <div
-              ref={batchInnerRef}
-              className="flex flex-col gap-0.5 w-full"
-              style={{
-                transform: `scale(${batchScale})`,
-                transformOrigin: 'top center',
-              }}
-            >
-              {batchRouletteStrips.map((strip, i) => (
-                <RouletteStripRow
-                  key={i}
-                  items={strip.items}
-                  targetX={strip.targetX}
-                  isSpinning={isSpinning}
-                  spinDuration={spinDuration}
-                  onComplete={handleBatchStripComplete}
-                  tickEnabled={i === 4}
-                />
-              ))}
-            </div>
+          <div className="flex w-full flex-col gap-0.5">
+            {batchRouletteStrips.map((strip, i) => (
+              <RouletteStripRow
+                key={i}
+                items={strip.items}
+                targetX={strip.targetX}
+                isSpinning={isSpinning}
+                spinDuration={spinDuration}
+                onComplete={handleBatchStripComplete}
+                tickEnabled={i === 4}
+              />
+            ))}
           </div>
         </div>
       ) : (
