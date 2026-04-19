@@ -94,12 +94,8 @@ export default function AppLayout() {
         </div>
       </div>
 
-      {/* 主内容区域：宝箱页由内部区域滚动，其它 Tab 可整体滚动 */}
-      <div
-        className={`flex-1 relative min-h-0 ${
-          activeTab === 'ducks' ? 'overflow-hidden' : 'overflow-y-auto'
-        }`}
-      >
+      {/* 主内容区域：宝箱页整页纵向滚动（开箱 + 商城同步移动），其它 Tab 可整体滚动 */}
+      <div className="flex-1 relative min-h-0 overflow-y-auto overscroll-y-contain">
         {activeTab === 'ducks' ? (
           <ChestView />
         ) : activeTab === 'eggs' ? (

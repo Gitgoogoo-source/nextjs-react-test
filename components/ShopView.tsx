@@ -49,7 +49,7 @@ function hapticNotify(type: 'success' | 'error' | 'warning') {
   }
 }
 
-/** 嵌入「宝箱」页下半部分的商城：4 列网格，区域内部滚动 */
+/** 嵌入「宝箱」页下半部分的商城：4 列网格；纵向滚动由外层页面统一处理 */
 export function ShopSection() {
   const { isSyncing } = useTelegramAuth();
   const initData = useUserStore((s) => s.initData);
@@ -144,12 +144,12 @@ export function ShopSection() {
 
   if (isLoading || isSyncing) {
     return (
-      <div className="flex flex-col h-full min-h-0 px-3 pb-2">
+      <div className="flex w-full flex-col px-3 pb-2">
         <div className="shrink-0 flex items-center gap-2 mb-2 px-0.5">
           <ShoppingBag className="w-5 h-5 text-white/90" />
           <h3 className="text-lg font-bold text-white">商城</h3>
         </div>
-        <div className="flex-1 flex items-center justify-center min-h-[120px]">
+        <div className="flex min-h-[100px] items-center justify-center py-6">
           <div className="flex items-center gap-2 text-white/90">
             <Loader2 className="w-5 h-5 animate-spin" />
             <span className="text-sm animate-pulse">加载商品中...</span>
@@ -161,7 +161,7 @@ export function ShopSection() {
 
   if (!initData) {
     return (
-      <div className="flex flex-col h-full min-h-0 px-3 pb-2 justify-center">
+      <div className="flex w-full flex-col justify-center px-3 py-4 pb-2">
         <div className="shrink-0 flex items-center gap-2 mb-2 px-0.5">
           <ShoppingBag className="w-5 h-5 text-white/90" />
           <h3 className="text-lg font-bold text-white">商城</h3>
@@ -177,14 +177,14 @@ export function ShopSection() {
 
   if (error) {
     return (
-      <div className="flex flex-col h-full min-h-0 px-3 pb-2">
+      <div className="flex w-full flex-col px-3 pb-2">
         <div className="shrink-0 flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-white/90" />
             <h3 className="text-lg font-bold text-white">商城</h3>
           </div>
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+        <div className="flex min-h-[120px] flex-col items-center justify-center px-2 py-6 text-center">
           <AlertTriangle className="w-10 h-10 text-zinc-700 mb-2" />
           <div className="text-white font-semibold text-sm mb-1">加载失败</div>
           <div className="text-zinc-500 text-xs mb-3">{error}</div>
@@ -200,7 +200,7 @@ export function ShopSection() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 px-3 pb-safe">
+    <div className="flex w-full flex-col px-3 pb-safe pt-1">
       <div className="shrink-0 flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <ShoppingBag className="w-5 h-5 text-white/90" />
@@ -226,14 +226,14 @@ export function ShopSection() {
       ) : null}
 
       {visibleProducts.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center px-2 min-h-[120px]">
+        <div className="flex min-h-[100px] flex-col items-center justify-center px-2 py-8 text-center">
           <Sparkles className="w-12 h-12 text-zinc-700 mb-2" />
           <div className="text-white font-semibold text-sm mb-0.5">暂无上架商品</div>
           <div className="text-zinc-500 text-xs">稍后再来看看吧。</div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:thin] [-ms-overflow-style:none] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/15">
-          <div className="grid grid-cols-4 gap-2 pb-2">
+        <div className="pb-2">
+          <div className="grid grid-cols-4 gap-2">
             {visibleProducts.map((p) => {
               const isPurchasing = purchasingId === p.id;
               const title = p.title || p.cases?.name || p.items?.name || '未命名';
