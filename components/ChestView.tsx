@@ -115,15 +115,16 @@ export default function ChestView() {
   }
 
   return (
-    <div className="flex w-full min-h-full flex-col">
-      {/* 开箱区域：至少占视口高度约 2/3，内容超出时整块随页面滚动 */}
-      <section className="relative flex min-h-[66.666dvh] flex-col border-b border-white/10">
+    // min-h-full：至少撑满主内容区高度，便于按 2:1 分配；内容更高时整块变长由外层滚动
+    <div className="flex min-h-full min-w-0 w-full flex-1 flex-col">
+      {/* 开箱区域：占主内容区（顶栏与底栏之间）高度的约 2/3 */}
+      <section className="relative flex flex-[2_1_0%] flex-col border-b border-white/10">
         {isLoadingChests || isSyncing ? (
-          <div className="flex flex-1 min-h-[40dvh] items-center justify-center px-4 py-8">
+          <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
             <div className="text-white text-lg animate-pulse">加载宝箱中...</div>
           </div>
         ) : chestLoadError ? (
-          <div className="flex flex-1 min-h-[40dvh] flex-col items-center justify-center px-4 py-8 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
             <h2 className="text-lg font-bold text-white mb-1">加载失败</h2>
             <p className="text-zinc-400 text-sm mb-4">{chestLoadError}</p>
@@ -136,7 +137,7 @@ export default function ChestView() {
             </button>
           </div>
         ) : userChests.length === 0 ? (
-          <div className="flex flex-1 min-h-[40dvh] flex-col items-center justify-center px-4 py-8 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center px-4 py-8 text-center">
             <Package className="w-16 h-16 text-zinc-700 mb-3" />
             <h2 className="text-xl font-bold text-white mb-1">暂无宝箱</h2>
             <p className="text-zinc-400 text-sm max-w-[280px]">
@@ -331,8 +332,8 @@ export default function ChestView() {
         )}
       </section>
 
-      {/* 商城区域：至少占视口高度约 1/3，与开箱区同一滚动容器内同步移动 */}
-      <section className="flex min-h-[33.334dvh] flex-col">
+      {/* 商城区域：占主内容区高度的约 1/3，与开箱区同一滚动容器内同步移动 */}
+      <section className="flex flex-[1_1_0%] flex-col">
         <ShopSection />
       </section>
     </div>
