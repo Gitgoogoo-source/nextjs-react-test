@@ -115,10 +115,10 @@ export default function AppLayout() {
       </div>
 
       {/* 底部浮动导航：圆角胶囊 + 半透明底 + 细透明边 + 毛玻璃 */}
-      <div className="shrink-0 px-3 pt-1 pb-[calc(var(--tg-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+10px)]">
+      <div className="shrink-0 px-2.5 pt-0.5 pb-[calc(var(--tg-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+8px)]">
         <nav
           className={[
-            'mx-auto flex max-w-full items-stretch justify-around gap-0.5 rounded-full px-1 py-1.5',
+            'mx-auto flex max-w-full items-stretch justify-around gap-0.5 rounded-full px-1 py-1',
             'border border-foreground/18 bg-foreground/[0.07] shadow-[0_10px_40px_rgba(0,0,0,0.35)]',
             'backdrop-blur-xl backdrop-saturate-150',
             '[box-shadow:inset_0_1px_0_rgba(255,255,255,0.06)]',
@@ -135,7 +135,7 @@ export default function AppLayout() {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={[
-                  'relative flex min-w-0 flex-1 flex-col items-center justify-center rounded-full py-1.5 transition-all duration-200',
+                  'relative flex min-w-0 flex-1 flex-col items-center justify-center rounded-full py-1 transition-all duration-200',
                   isActive ? 'text-foreground' : 'text-tg-hint hover:text-foreground/85',
                 ].join(' ')}
               >
@@ -150,7 +150,7 @@ export default function AppLayout() {
                   <div className="relative">
                     <Icon
                       className={[
-                        'h-6 w-6 transition-colors',
+                        'h-5 w-5 transition-colors',
                         isActive ? 'text-foreground' : 'text-tg-hint',
                       ].join(' ')}
                     />
@@ -161,7 +161,7 @@ export default function AppLayout() {
                       />
                     )}
                     {tab.badge ? (
-                      <div className="absolute -top-2 -right-3 min-w-[18px] rounded-full border-[1.5px] border-foreground/25 bg-red-500 px-1.5 py-0.5 text-center text-app-caption font-bold text-white shadow-sm">
+                      <div className="absolute -top-1.5 -right-3 min-w-[16px] rounded-full border-[1.5px] border-foreground/25 bg-red-500 px-1.5 py-0.5 text-center text-app-caption font-bold text-white shadow-sm">
                         {tab.badge > 99 ? '99+' : tab.badge}
                       </div>
                     ) : null}
