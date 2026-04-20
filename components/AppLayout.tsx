@@ -115,7 +115,7 @@ export default function AppLayout() {
       </div>
 
       {/* 底部浮动导航：圆角胶囊 + 半透明底 + 细透明边 + 毛玻璃 */}
-      <div className="shrink-0 px-3 pt-1 pb-safe">
+      <div className="shrink-0 px-3 pt-1 pb-[calc(var(--tg-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+10px)]">
         <nav
           className={[
             'mx-auto flex max-w-full items-stretch justify-around gap-0.5 rounded-full px-1 py-1.5',
