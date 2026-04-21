@@ -914,6 +914,453 @@ $function$
 
 ---
 
+### 3.8 `request_mint_nft_secure`
+
+| 属性 | 值 |
+|------|-----|
+| **身份参数** | `p_user_id uuid, p_user_item_id uuid, p_wallet_id uuid, p_request_id uuid, p_payload_boc text, p_payload_hash text, p_admin_signature text, p_ipfs_metadata_uri text, p_collection_id uuid, p_expires_at timestamp with time zone` |
+| **返回类型** | `json` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | `false` |
+| **行为摘要** | NFT 铸造请求「签名入库」RPC：锁定 `users`/`user_items`/`user_ton_wallets`/`nft_collections` 行，校验归属与 mintable 开关；幂等插入 `nft_mint_requests (user_id, request_id)`；将 `user_items.locked_for_mint + 1`；把 payload/签名回填并置为 `signed`；返回前端需要的 `collection_address/payload_boc/admin_signature/expires_at`。 |
+
+**源定义：**
+
+```sql
+CREATE OR REPLACE FUNCTION public.request_mint_nft_secure(p_user_id uuid, p_user_item_id uuid, p_wallet_id uuid, p_request_id uuid, p_payload_boc text, p_payload_hash text, p_admin_signature text, p_ipfs_metadata_uri text, p_collection_id uuid, p_expires_at timestamp with time zone)
+ RETURNS json
+ LANGUAGE plpgsql
+AS $function$
+declare
+  v_claimed_id uuid;
+  v_existing record;
+
+  v_user_telegram_id bigint;
+
+  v_user_item_user_id uuid;
+  v_item_id uuid;
+  v_quantity int;
+  v_locked_for_mint int;
+
+  v_item_is_mintable boolean;
+
+  v_meta_collection_id uuid;
+  v_meta_ipfs_metadata_uri text;
+  v_meta_is_mintable boolean;
+
+  v_wallet_user_id uuid;
+  v_wallet_address text;
+  v_wallet_unbound_at timestamptz;
+
+  v_collection_address text;
+  v_collection_is_active boolean;
+
+  v_inflight_exists boolean;
+begin
+  -- 读取用户 telegram_id（用于审计快照）
+  select u.telegram_id
+    into v_user_telegram_id
+  from public.users u
+  where u.id = p_user_id
+  for update;
+
+  if v_user_telegram_id is null then
+    raise exception 'User not found';
+  end if;
+
+  -- 3) 锁定 user_items 行并校验归属与库存
+  select ui.user_id, ui.item_id, ui.quantity, ui.locked_for_mint
+    into v_user_item_user_id, v_item_id, v_quantity, v_locked_for_mint
+  from public.user_items ui
+  where ui.id = p_user_item_id
+  for update;
+
+  if v_user_item_user_id is null then
+    raise exception 'user_item not found';
+  end if;
+
+  if v_user_item_user_id <> p_user_id then
+    raise exception 'user_item does not belong to user';
+  end if;
+
+  if (v_quantity - v_locked_for_mint) < 1 then
+    raise exception 'not enough available quantity to mint';
+  end if;
+
+  -- 4) 校验 items / item_nft_metadata 可铸造开关
+  select i.is_mintable
+    into v_item_is_mintable
+  from public.items i
+  where i.id = v_item_id;
+
+  if coalesce(v_item_is_mintable, false) is distinct from true then
+    raise exception 'item is not mintable';
+  end if;
+
+  select m.collection_id, m.ipfs_metadata_uri, m.is_mintable
+    into v_meta_collection_id, v_meta_ipfs_metadata_uri, v_meta_is_mintable
+  from public.item_nft_metadata m
+  where m.item_id = v_item_id;
+
+  if v_meta_collection_id is null then
+    raise exception 'item nft metadata not found';
+  end if;
+
+  if coalesce(v_meta_is_mintable, false) is distinct from true then
+    raise exception 'item nft metadata is not mintable';
+  end if;
+
+  if v_meta_collection_id <> p_collection_id then
+    raise exception 'collection_id does not match item metadata';
+  end if;
+
+  if v_meta_ipfs_metadata_uri <> p_ipfs_metadata_uri then
+    raise exception 'ipfs_metadata_uri does not match item metadata';
+  end if;
+
+  -- 5) 校验钱包未解绑且归属一致
+  select w.user_id, w.wallet_address, w.unbound_at
+    into v_wallet_user_id, v_wallet_address, v_wallet_unbound_at
+  from public.user_ton_wallets w
+  where w.id = p_wallet_id
+  for update;
+
+  if v_wallet_user_id is null then
+    raise exception 'wallet not found';
+  end if;
+
+  if v_wallet_user_id <> p_user_id then
+    raise exception 'wallet does not belong to user';
+  end if;
+
+  if v_wallet_unbound_at is not null then
+    raise exception 'wallet is unbound';
+  end if;
+
+  -- 6) 校验集合启用
+  select c.collection_address, c.is_active
+    into v_collection_address, v_collection_is_active
+  from public.nft_collections c
+  where c.id = p_collection_id
+  for update;
+
+  if v_collection_address is null then
+    raise exception 'collection not found';
+  end if;
+
+  if coalesce(v_collection_is_active, false) is distinct from true then
+    raise exception 'collection is not active';
+  end if;
+
+  -- 1) 幂等抢占：插入 pending
+  insert into public.nft_mint_requests (
+    user_id,
+    telegram_id,
+    user_item_id,
+    item_id,
+    wallet_id,
+    wallet_address,
+    collection_id,
+    collection_address,
+    ipfs_metadata_uri,
+    request_id,
+    status,
+    expires_at
+  )
+  values (
+    p_user_id,
+    v_user_telegram_id,
+    p_user_item_id,
+    v_item_id,
+    p_wallet_id,
+    v_wallet_address,
+    p_collection_id,
+    v_collection_address,
+    p_ipfs_metadata_uri,
+    p_request_id,
+    'pending',
+    p_expires_at
+  )
+  on conflict (user_id, request_id) do nothing
+  returning id into v_claimed_id;
+
+  -- 2) 命中幂等：直接返回现有记录
+  if v_claimed_id is null then
+    select collection_address, mint_payload_boc, admin_signature, expires_at
+      into v_existing
+    from public.nft_mint_requests
+    where user_id = p_user_id and request_id = p_request_id
+    for update;
+
+    return json_build_object(
+      'collection_address', v_existing.collection_address,
+      'payload_boc', v_existing.mint_payload_boc,
+      'admin_signature', v_existing.admin_signature,
+      'expires_at', v_existing.expires_at
+    );
+  end if;
+
+  -- 7) 显式拒绝：同一 user_item_id 不允许存在进行中请求（排除当前 claimed）
+  select exists (
+    select 1
+    from public.nft_mint_requests r
+    where r.user_item_id = p_user_item_id
+      and r.status = any (array['pending','signed','broadcasted'])
+      and r.id <> v_claimed_id
+  ) into v_inflight_exists;
+
+  if v_inflight_exists then
+    raise exception 'mint request already in progress for this user_item_id';
+  end if;
+
+  -- 8) 锁定库存（locked_for_mint + 1）
+  update public.user_items
+  set locked_for_mint = locked_for_mint + 1,
+      updated_at = now()
+  where id = p_user_item_id;
+
+  -- 9) 回填请求记录并置为 signed
+  update public.nft_mint_requests
+  set
+    status = 'signed',
+    mint_payload_boc = p_payload_boc,
+    payload_hash = p_payload_hash,
+    admin_signature = p_admin_signature,
+    expires_at = p_expires_at,
+    updated_at = now()
+  where id = v_claimed_id;
+
+  -- 10) 返回前端所需数据
+  return json_build_object(
+    'collection_address', v_collection_address,
+    'payload_boc', p_payload_boc,
+    'admin_signature', p_admin_signature,
+    'expires_at', p_expires_at
+  );
+end;
+$function$
+```
+
+---
+
+### 3.9 `expire_stale_mint_requests`
+
+| 属性 | 值 |
+|------|-----|
+| **身份参数** | （无） |
+| **返回类型** | `TABLE(expired_request_id uuid, req_user_item_id uuid)` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | **`true`** |
+| **search_path** | `SET search_path TO 'public', 'pg_temp'` |
+| **行为摘要** | 扫描 `nft_mint_requests` 中超时且仍在进行中的请求（`pending/signed/broadcasted` 且 `expires_at < now()`），将其置为 `expired` 并释放 `user_items.locked_for_mint`；对请求行使用 `FOR UPDATE ... SKIP LOCKED` 以支持并发清理。 |
+
+**源定义：**
+
+```sql
+CREATE OR REPLACE FUNCTION public.expire_stale_mint_requests()
+ RETURNS TABLE(expired_request_id uuid, req_user_item_id uuid)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+declare
+  r record;
+  v_new_locked int;
+begin
+  for r in
+    select nmr.id, nmr.user_item_id as req_user_item_id
+    from public.nft_mint_requests as nmr
+    where nmr.status in ('pending','signed','broadcasted')
+      and nmr.expires_at < now()
+    order by nmr.expires_at asc
+    for update of nmr skip locked
+  loop
+    update public.nft_mint_requests
+    set
+      status = 'expired',
+      failure_reason = 'timeout',
+      updated_at = now()
+    where id = r.id
+      and status in ('pending','signed','broadcasted');
+
+    if not found then
+      continue;
+    end if;
+
+    update public.user_items ui
+    set locked_for_mint = ui.locked_for_mint - 1
+    where ui.id = r.req_user_item_id
+    returning locked_for_mint into v_new_locked;
+
+    if v_new_locked is null then
+      raise exception 'user_item_not_found: %', r.req_user_item_id;
+    end if;
+
+    if v_new_locked < 0 then
+      raise exception 'user_item_locked_for_mint_negative: %', r.req_user_item_id;
+    end if;
+
+    expired_request_id := r.id;
+    req_user_item_id := r.req_user_item_id;
+    return next;
+  end loop;
+end;
+$function$
+```
+
+---
+
+### 3.10 `confirm_mint_nft_secure`
+
+| 属性 | 值 |
+|------|-----|
+| **身份参数** | `p_mint_request_id uuid, p_tx_hash text, p_nft_item_address text, p_owner_address text, p_exit_code integer, p_chain_event_id uuid` |
+| **返回类型** | `TABLE(success boolean, nft_item_address text)` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | **`true`** |
+| **search_path** | `SET search_path TO 'public', 'pg_temp'` |
+| **行为摘要** | 铸造结算 RPC：锁定 `nft_mint_requests` 并按 `exit_code` 走成功/失败路径；失败会释放 `user_items.locked_for_mint`；成功会扣减 `user_items.quantity` 与 `locked_for_mint` 并插入 `user_item_nfts`；同时将 `nft_chain_events` 标记为已处理，避免重复消费；对已成功的请求幂等返回。 |
+
+**源定义：**
+
+```sql
+CREATE OR REPLACE FUNCTION public.confirm_mint_nft_secure(p_mint_request_id uuid, p_tx_hash text, p_nft_item_address text, p_owner_address text, p_exit_code integer, p_chain_event_id uuid)
+ RETURNS TABLE(success boolean, nft_item_address text)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+declare
+  v_req public.nft_mint_requests%rowtype;
+  v_user_item public.user_items%rowtype;
+  v_failure_reason text;
+begin
+  -- 1) 锁定请求行（幂等 / 并发安全）
+  select * into v_req
+  from public.nft_mint_requests
+  where id = p_mint_request_id
+  for update;
+
+  if not found then
+    raise exception 'mint_request_not_found: %', p_mint_request_id;
+  end if;
+
+  -- 已成功：直接幂等返回
+  if v_req.status = 'succeeded' then
+    success := true;
+    nft_item_address := v_req.nft_item_address;
+    return next;
+    return;
+  end if;
+
+  -- 2) 失败路径：exit_code != 0
+  if coalesce(p_exit_code, 0) <> 0 then
+    v_failure_reason := 'chain_exit_code=' || p_exit_code::text;
+
+    update public.nft_mint_requests
+    set
+      status = 'failed',
+      failure_reason = v_failure_reason,
+      confirmed_tx_hash = p_tx_hash,
+      confirmed_at = now(),
+      updated_at = now()
+    where id = p_mint_request_id;
+
+    -- 释放锁定数量（如果还锁着）
+    update public.user_items ui
+    set locked_for_mint = ui.locked_for_mint - 1
+    where ui.id = v_req.user_item_id
+      and ui.locked_for_mint > 0;
+
+    -- 标记链事件已消费（避免重复处理）
+    update public.nft_chain_events
+    set processed = true,
+        processed_at = now()
+    where id = p_chain_event_id;
+
+    success := false;
+    nft_item_address := null;
+    return next;
+    return;
+  end if;
+
+  -- 3) 成功路径：允许从 pending/signed/broadcasted/expired 回捞
+  if v_req.status not in ('pending', 'signed', 'broadcasted', 'expired') then
+    raise exception 'mint_request_invalid_status_for_confirm: %', v_req.status;
+  end if;
+
+  update public.nft_mint_requests
+  set
+    status = 'succeeded',
+    confirmed_tx_hash = p_tx_hash,
+    nft_item_address = p_nft_item_address,
+    confirmed_at = now(),
+    updated_at = now()
+  where id = p_mint_request_id;
+
+  -- 锁定库存行并结算
+  select * into v_user_item
+  from public.user_items
+  where id = v_req.user_item_id
+  for update;
+
+  if not found then
+    raise exception 'user_item_not_found: %', v_req.user_item_id;
+  end if;
+
+  if v_user_item.quantity < 1 then
+    raise exception 'user_item_quantity_insufficient: %', v_req.user_item_id;
+  end if;
+
+  if v_user_item.locked_for_mint < 1 then
+    raise exception 'user_item_locked_for_mint_insufficient: %', v_req.user_item_id;
+  end if;
+
+  update public.user_items
+  set
+    quantity = quantity - 1,
+    locked_for_mint = locked_for_mint - 1
+  where id = v_req.user_item_id;
+
+  insert into public.user_item_nfts(
+    user_id,
+    item_id,
+    collection_id,
+    mint_request_id,
+    nft_item_address,
+    owner_address,
+    tx_hash,
+    ipfs_metadata_uri,
+    minted_at
+  ) values (
+    v_req.user_id,
+    v_req.item_id,
+    v_req.collection_id,
+    v_req.id,
+    p_nft_item_address,
+    p_owner_address,
+    p_tx_hash,
+    v_req.ipfs_metadata_uri,
+    now()
+  ) on conflict (mint_request_id) do nothing;
+
+  update public.nft_chain_events
+  set processed = true,
+      processed_at = now()
+  where id = p_chain_event_id;
+
+  success := true;
+  nft_item_address := p_nft_item_address;
+  return next;
+end;
+$function$
+```
+
+---
+
 ## 4. `public` — 触发器函数（非 `rpc`）
 
 ### 4.1 `set_updated_at`
@@ -1152,6 +1599,159 @@ $function$
 
 ---
 
+### 4.6 `item_nft_metadata_immutability_guard`
+
+| 属性 | 值 |
+|------|-----|
+| **返回类型** | `trigger` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | `false` |
+| **用途** | 更新 `item_nft_metadata`：约束 `item_id` / `collection_id` / `ipfs_metadata_uri` 等关键字段不可变，避免被更新成不一致的 NFT 元数据映射。 |
+
+**源定义：**
+
+```sql
+CREATE OR REPLACE FUNCTION public.item_nft_metadata_immutability_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  IF NEW.item_id IS DISTINCT FROM OLD.item_id THEN
+    RAISE EXCEPTION 'item_id is immutable';
+  END IF;
+  IF NEW.collection_id IS DISTINCT FROM OLD.collection_id THEN
+    RAISE EXCEPTION 'collection_id is immutable';
+  END IF;
+  IF NEW.ipfs_metadata_uri IS DISTINCT FROM OLD.ipfs_metadata_uri THEN
+    RAISE EXCEPTION 'ipfs_metadata_uri is immutable';
+  END IF;
+
+  RETURN NEW;
+END;
+$function$
+```
+
+---
+
+### 4.7 `nft_mint_requests_update_guard`
+
+| 属性 | 值 |
+|------|-----|
+| **返回类型** | `trigger` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | `false` |
+| **用途** | 更新 `nft_mint_requests`：限制关键字段不可变（`request_id/user_item_id/collection_address/ipfs_metadata_uri`）；并约束 `status` 只能向前流转（允许 `expired → succeeded` 作为链上回捞例外），终态不可随意回退或修改。 |
+
+**源定义：**
+
+```sql
+CREATE OR REPLACE FUNCTION public.nft_mint_requests_update_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  old_rank int;
+  new_rank int;
+BEGIN
+  -- 不可变字段（创建后定版）
+  IF NEW.request_id IS DISTINCT FROM OLD.request_id THEN
+    RAISE EXCEPTION 'request_id is immutable';
+  END IF;
+  IF NEW.user_item_id IS DISTINCT FROM OLD.user_item_id THEN
+    RAISE EXCEPTION 'user_item_id is immutable';
+  END IF;
+  IF NEW.collection_address IS DISTINCT FROM OLD.collection_address THEN
+    RAISE EXCEPTION 'collection_address is immutable';
+  END IF;
+  IF NEW.ipfs_metadata_uri IS DISTINCT FROM OLD.ipfs_metadata_uri THEN
+    RAISE EXCEPTION 'ipfs_metadata_uri is immutable';
+  END IF;
+
+  -- status 只能向前流转（允许 expired -> succeeded 作为链上回捞例外）
+  old_rank := CASE OLD.status
+    WHEN 'pending' THEN 10
+    WHEN 'signed' THEN 20
+    WHEN 'broadcasted' THEN 30
+    WHEN 'succeeded' THEN 40
+    WHEN 'failed' THEN 40
+    WHEN 'expired' THEN 40
+    ELSE 0
+  END;
+
+  new_rank := CASE NEW.status
+    WHEN 'pending' THEN 10
+    WHEN 'signed' THEN 20
+    WHEN 'broadcasted' THEN 30
+    WHEN 'succeeded' THEN 40
+    WHEN 'failed' THEN 40
+    WHEN 'expired' THEN 40
+    ELSE 0
+  END;
+
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    IF (OLD.status = 'expired' AND NEW.status = 'succeeded') THEN
+      -- 允许回捞
+      RETURN NEW;
+    END IF;
+
+    IF new_rank < old_rank THEN
+      RAISE EXCEPTION 'status can only move forward';
+    END IF;
+
+    -- 终态不允许变更（除 expired -> succeeded）
+    IF OLD.status IN ('succeeded', 'failed') THEN
+      RAISE EXCEPTION 'terminal status is immutable';
+    END IF;
+
+    IF OLD.status = 'expired' AND NEW.status <> 'expired' THEN
+      RAISE EXCEPTION 'expired can only be recovered to succeeded';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$function$
+```
+
+---
+
+### 4.8 `user_item_nfts_immutability_guard`
+
+| 属性 | 值 |
+|------|-----|
+| **返回类型** | `trigger` |
+| **语言** | `plpgsql` |
+| **Volatile** | `VOLATILE` |
+| **SECURITY DEFINER** | `false` |
+| **用途** | 更新 `user_item_nfts`：约束 `nft_item_address/mint_request_id/item_id` 等关键字段不可变，避免链上资产指向被篡改。 |
+
+**源定义：**
+
+```sql
+CREATE OR REPLACE FUNCTION public.user_item_nfts_immutability_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  IF NEW.nft_item_address IS DISTINCT FROM OLD.nft_item_address THEN
+    RAISE EXCEPTION 'nft_item_address is immutable';
+  END IF;
+  IF NEW.mint_request_id IS DISTINCT FROM OLD.mint_request_id THEN
+    RAISE EXCEPTION 'mint_request_id is immutable';
+  END IF;
+  IF NEW.item_id IS DISTINCT FROM OLD.item_id THEN
+    RAISE EXCEPTION 'item_id is immutable';
+  END IF;
+
+  RETURN NEW;
+END;
+$function$
+```
+
+---
+
 ## 5. 索引表（按名称）
 
 | Schema | 函数名 | 返回类型 | 客户端 RPC |
@@ -1160,14 +1760,20 @@ $function$
 | `public` | `accept_invite_and_reward` | `json` | 是 |
 | `public` | `check_and_increment_rate_limit` | `jsonb` | 是 |
 | `public` | `cleanup_expired_rate_limits` | `void` | 是 |
+| `public` | `confirm_mint_nft_secure` | `TABLE(success boolean, nft_item_address text)` | 是（建议仅服务端） |
 | `public` | `execute_asset_transaction` | `json` | 是 |
+| `public` | `expire_stale_mint_requests` | `TABLE(expired_request_id uuid, req_user_item_id uuid)` | 是（建议仅服务端/定时任务） |
 | `public` | `open_chest_secure` | `json` | 是 |
 | `public` | `open_chest_batch_secure` | `json` | 是 |
+| `public` | `request_mint_nft_secure` | `json` | 是（建议仅服务端） |
 | `public` | `shop_purchase` | `json` | 是 |
+| `public` | `item_nft_metadata_immutability_guard` | `trigger` | **否** |
+| `public` | `nft_mint_requests_update_guard` | `trigger` | **否** |
 | `public` | `set_updated_at` | `trigger` | **否** |
 | `public` | `tg_invite_rewards_guard` | `trigger` | **否** |
 | `public` | `tg_invite_rewards_update_guard` | `trigger` | **否** |
 | `public` | `tg_user_invites_set_snapshots_and_guard` | `trigger` | **否** |
 | `public` | `tg_user_invites_update_guard` | `trigger` | **否** |
+| `public` | `user_item_nfts_immutability_guard` | `trigger` | **否** |
 
-**合计：** `graphql_public` 1 个 + `public` 12 个 = **13** 个函数。
+**合计：** `graphql_public` 1 个 + `public` 18 个 = **19** 个函数。

@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+
+1. **严禁**在任何 Client Component / `"use client"` 文件中引用 `nft_*` 表或新增 RPC；所有入口通过 `createAdminClient()`。
+2. 每个 Server Action / API Route 入口**必须**先调用 `validateTelegramWebAppData(initData)`，并以验签返回的 `user.id` 作为 `p_user_id`；**严禁**信任前端传入的 `wallet_address`（由 `p_wallet_id` 在库侧反查）。
+3. **管理员私钥**（用来对 Payload 进行 Ed25519 签名）只能以环境变量形式存在，例如 `TON_MINT_ADMIN_SECRET`，**不得**进入 `NEXT_PUBLIC_*` 命名空间或前端打包。
+4. 所有新增 RPC 必须用 `zod` 在入口校验 `request_id`、`user_item_id`、`wallet_id` 等 uuid 合法性。
+5. 新增路径使用 `check_and_increment_rate_limit` 做限流（例如"同一 telegram_id 60 秒内最多 3 次 mint 请求"）。
+6. 成功/失败后调用 `revalidateGameRoot()`（见 `lib/revalidate-game.ts`）。

@@ -11,7 +11,14 @@
 
 **场景说明**：每张表标题下的「场景说明」为根据本仓库业务（Telegram Mini App 小游戏、开箱/商店/邀请等）与 Supabase 平台能力归纳的用途说明，便于读文档时对齐产品场景；**不是**数据库 `COMMENT` 字段的自动导出（若与线上实际用法不一致，以代码与 RPC 为准）。
 
-**未包含**：索引（INDEX）、唯一约束（除列级 `unique` 标记外）、触发器、视图/物化视图、RLS 策略正文；若需要可再用只读 SQL 从 `pg_catalog` / `information_schema` 导出。
+**补充包含（远程只读导出）**：为便于排查幂等/并发与数据一致性问题，本文件已额外补充以下元数据（来自 `pg_catalog` / `information_schema` 的只读 SQL 导出）：
+
+- **RLS policies**：`pg_policies`（仅导出策略正文，不做权限推断）
+- **Indexes**：`pg_indexes`（含 partial index 的 `WHERE` 条件）
+- **PK / UNIQUE 约束**：`pg_constraint`（仅 `PRIMARY KEY` 与 `UNIQUE`）
+- **Triggers → Functions 绑定关系**：`pg_trigger` / `pg_proc`（含 trigger 定义与所调用函数）
+
+> 重要提示：很多表虽然显示 “RLS: 开启”，但如果 **没有任何 policy**，则对 `anon` / `authenticated` 等角色默认 **不可见/不可写**；本项目的服务端使用 Service Role 会绕过 RLS，因此仍需在应用层按 `telegram_id/user_id` 做强过滤。
 
 ## 目录
 
@@ -32,6 +39,12 @@
 - [public.invite_rewards](#publicinvite_rewards)
 - [public.user_prepared_messages](#publicuser_prepared_messages)
 - [public.api_rate_limits](#publicapi_rate_limits)
+- [public.user_ton_wallets](#publicuser_ton_wallets)
+- [public.nft_collections](#publicnft_collections)
+- [public.item_nft_metadata](#publicitem_nft_metadata)
+- [public.nft_mint_requests](#publicnft_mint_requests)
+- [public.user_item_nfts](#publicuser_item_nfts)
+- [public.nft_chain_events](#publicnft_chain_events)
 
 ### auth
 
@@ -147,6 +160,8 @@ RLS: 开启 | 估算行数: 5
 | `border` | text | text | — | — | — | — |
 | `hex` | text | text | — | — | — | — |
 | `created_at` | timestamp with time zone | timestamptz | — | timezone('utc'::text, now()) | — | — |
+| `is_mintable` | boolean | bool | — | false | — | — |
+| `mint_gas_estimate_nano_ton` | bigint | int8 | nullable | — | — | — |
 
 **主键**：`id`
 
@@ -157,6 +172,9 @@ RLS: 开启 | 估算行数: 5
 - `invite_rewards_item_id_fkey`：`public.invite_rewards.item_id` → `public.items.id`
 - `case_items_item_id_fkey`：`public.case_items.item_id` → `public.items.id`
 - `user_items_item_id_fkey`：`public.user_items.item_id` → `public.items.id`
+- `item_nft_metadata_item_id_fkey`：`public.item_nft_metadata.item_id` → `public.items.id`
+- `nft_mint_requests_item_id_fkey`：`public.nft_mint_requests.item_id` → `public.items.id`
+- `user_item_nfts_item_id_fkey`：`public.user_item_nfts.item_id` → `public.items.id`
 
 ---
 
@@ -247,6 +265,7 @@ RLS: 开启 | 估算行数: 7
 | `quantity` | integer | int4 | — | 1 | CHECK: quantity >= 0 | — |
 | `created_at` | timestamp with time zone | timestamptz | nullable | now() | — | — |
 | `updated_at` | timestamp with time zone | timestamptz | nullable | now() | — | — |
+| `locked_for_mint` | integer | int4 | — | 0 | — | — |
 
 **主键**：`id`
 
@@ -254,6 +273,7 @@ RLS: 开启 | 估算行数: 7
 
 - `user_items_user_id_fkey`：`public.user_items.user_id` → `public.users.id`
 - `user_items_item_id_fkey`：`public.user_items.item_id` → `public.items.id`
+- `nft_mint_requests_user_item_id_fkey`：`public.nft_mint_requests.user_item_id` → `public.user_items.id`
 
 ---
 
@@ -474,6 +494,194 @@ RLS: 开启 | 估算行数: 218
 | `updated_at` | timestamp with time zone | timestamptz | — | now() | — | — |
 
 **主键**：`scope`, `route`, `window_start`
+
+---
+
+## public.user_ton_wallets
+
+**场景说明**：用户绑定的 TON 钱包：用于 NFT 铸造/发放时的收款地址与链环境（mainnet/testnet）记录。**注意**：按项目约定，服务端只信任 `wallet_id`，钱包地址 `wallet_address` 在库侧反查，不信任客户端直接传地址。
+
+RLS: 开启 | 估算行数: 0
+
+| 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | uuid | uuid | — | gen_random_uuid() | — | — |
+| `user_id` | uuid | uuid | — | — | — | — |
+| `telegram_id` | bigint | int8 | — | — | — | — |
+| `wallet_address` | text | text | — | — | CHECK: length(wallet_address) >= 48 AND length(wallet_address) <= 68 AND wallet_address ~ '^[A-Za-z0-9_-]{48,68}$'::text | — |
+| `wallet_chain` | text | text | — | 'ton-mainnet'::text | CHECK: wallet_chain = ANY (ARRAY['ton-mainnet'::text, 'ton-testnet'::text]) | — |
+| `is_primary` | boolean | bool | — | true | — | — |
+| `public_key` | text | text | nullable | — | — | — |
+| `first_bound_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `last_active_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `unbound_at` | timestamp with time zone | timestamptz | nullable | — | — | — |
+
+**主键**：`id`
+
+**外键约束**：
+
+- `user_ton_wallets_user_id_fkey`：`public.user_ton_wallets.user_id` → `public.users.id`
+- `nft_mint_requests_wallet_id_fkey`：`public.nft_mint_requests.wallet_id` → `public.user_ton_wallets.id`
+
+---
+
+## public.nft_collections
+
+**场景说明**：NFT 集合配置：集合地址、名称、版税与铸造权限等。`nft_mint_requests` / `item_nft_metadata` / `user_item_nfts` 引用此表以绑定集合。
+
+RLS: 开启 | 估算行数: 0
+
+| 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | uuid | uuid | — | gen_random_uuid() | — | — |
+| `collection_key` | text | text | unique | — | — | — |
+| `collection_address` | text | text | unique | — | — | — |
+| `chain` | text | text | — | 'ton-mainnet'::text | CHECK: chain = ANY (ARRAY['ton-mainnet'::text, 'ton-testnet'::text]) | — |
+| `name` | text | text | — | — | — | — |
+| `description` | text | text | nullable | — | — | — |
+| `cover_uri` | text | text | nullable | — | — | — |
+| `royalty_basis_points` | integer | int4 | — | 500 | CHECK: royalty_basis_points >= 0 AND royalty_basis_points <= 10000 | — |
+| `royalty_address` | text | text | — | — | — | — |
+| `mint_authority_address` | text | text | — | — | — | — |
+| `is_active` | boolean | bool | — | true | — | — |
+| `created_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `updated_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+
+**主键**：`id`
+
+**外键约束**：
+
+- `item_nft_metadata_collection_id_fkey`：`public.item_nft_metadata.collection_id` → `public.nft_collections.id`
+- `nft_mint_requests_collection_id_fkey`：`public.nft_mint_requests.collection_id` → `public.nft_collections.id`
+- `user_item_nfts_collection_id_fkey`：`public.user_item_nfts.collection_id` → `public.nft_collections.id`
+
+---
+
+## public.item_nft_metadata
+
+**场景说明**：物品 → NFT 元数据映射：每种可铸造物品（`items`）对应一条 NFT metadata（IPFS metadata URI、属性等）与所属集合。用于铸造请求参数对齐与防篡改校验。
+
+RLS: 开启 | 估算行数: 0
+
+| 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | uuid | uuid | — | gen_random_uuid() | — | — |
+| `item_id` | uuid | uuid | unique | — | — | — |
+| `collection_id` | uuid | uuid | — | — | — | — |
+| `ipfs_metadata_uri` | text | text | — | — | — | — |
+| `ipfs_image_uri` | text | text | nullable | — | — | — |
+| `attributes` | jsonb | jsonb | — | '{}'::jsonb | — | — |
+| `is_mintable` | boolean | bool | — | true | — | — |
+| `created_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `updated_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+
+**主键**：`id`
+
+**外键约束**：
+
+- `item_nft_metadata_item_id_fkey`：`public.item_nft_metadata.item_id` → `public.items.id`
+- `item_nft_metadata_collection_id_fkey`：`public.item_nft_metadata.collection_id` → `public.nft_collections.id`
+
+---
+
+## public.nft_mint_requests
+
+**场景说明**：NFT 铸造请求：记录一次铸造所需 payload（BOC）、管理员签名、目标钱包与集合地址、状态流转与超时时间；并通过 `user_item_id` 锁定用户库存（`user_items.locked_for_mint`）避免并发重复铸造。
+
+RLS: 开启 | 估算行数: 0
+
+| 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | uuid | uuid | — | gen_random_uuid() | — | — |
+| `user_id` | uuid | uuid | — | — | — | — |
+| `telegram_id` | bigint | int8 | — | — | — | — |
+| `user_item_id` | uuid | uuid | — | — | — | — |
+| `item_id` | uuid | uuid | — | — | — | — |
+| `wallet_id` | uuid | uuid | — | — | — | — |
+| `wallet_address` | text | text | — | — | — | — |
+| `collection_id` | uuid | uuid | — | — | — | — |
+| `collection_address` | text | text | — | — | — | — |
+| `ipfs_metadata_uri` | text | text | — | — | — | — |
+| `request_id` | uuid | uuid | — | — | — | — |
+| `mint_payload_boc` | text | text | nullable | — | — | — |
+| `payload_hash` | text | text | nullable | — | — | — |
+| `admin_signature` | text | text | nullable | — | — | — |
+| `status` | text | text | — | 'pending'::text | CHECK: status = ANY (ARRAY['pending'::text, 'signed'::text, 'broadcasted'::text, 'succeeded'::text, 'failed'::text, 'expired'::text]) | — |
+| `failure_reason` | text | text | nullable | — | — | — |
+| `expires_at` | timestamp with time zone | timestamptz | — | — | — | — |
+| `broadcasted_tx_hash` | text | text | nullable | — | — | — |
+| `confirmed_tx_hash` | text | text | nullable | — | — | — |
+| `nft_item_address` | text | text | nullable | — | — | — |
+| `created_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `updated_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `confirmed_at` | timestamp with time zone | timestamptz | nullable | — | — | — |
+
+**主键**：`id`
+
+**外键约束**：
+
+- `nft_mint_requests_user_id_fkey`：`public.nft_mint_requests.user_id` → `public.users.id`
+- `nft_mint_requests_user_item_id_fkey`：`public.nft_mint_requests.user_item_id` → `public.user_items.id`
+- `nft_mint_requests_item_id_fkey`：`public.nft_mint_requests.item_id` → `public.items.id`
+- `nft_mint_requests_wallet_id_fkey`：`public.nft_mint_requests.wallet_id` → `public.user_ton_wallets.id`
+- `nft_mint_requests_collection_id_fkey`：`public.nft_mint_requests.collection_id` → `public.nft_collections.id`
+- `user_item_nfts_mint_request_id_fkey`：`public.user_item_nfts.mint_request_id` → `public.nft_mint_requests.id`
+
+---
+
+## public.user_item_nfts
+
+**场景说明**：已铸造 NFT 记录：把某个用户物品铸造成链上 NFT 后的结果落表（`nft_item_address`、`owner_address`、`tx_hash` 等），并与 `mint_request_id` 做 1:1 绑定。
+
+RLS: 开启 | 估算行数: 0
+
+| 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | uuid | uuid | — | gen_random_uuid() | — | — |
+| `user_id` | uuid | uuid | — | — | — | — |
+| `item_id` | uuid | uuid | — | — | — | — |
+| `collection_id` | uuid | uuid | — | — | — | — |
+| `mint_request_id` | uuid | uuid | unique | — | — | — |
+| `nft_item_address` | text | text | unique | — | — | — |
+| `owner_address` | text | text | — | — | — | — |
+| `tx_hash` | text | text | — | — | — | — |
+| `ipfs_metadata_uri` | text | text | — | — | — | — |
+| `minted_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+| `last_seen_owner_at` | timestamp with time zone | timestamptz | nullable | — | — | — |
+| `is_burned` | boolean | bool | — | false | — | — |
+
+**主键**：`id`
+
+**外键约束**：
+
+- `user_item_nfts_user_id_fkey`：`public.user_item_nfts.user_id` → `public.users.id`
+- `user_item_nfts_item_id_fkey`：`public.user_item_nfts.item_id` → `public.items.id`
+- `user_item_nfts_collection_id_fkey`：`public.user_item_nfts.collection_id` → `public.nft_collections.id`
+- `user_item_nfts_mint_request_id_fkey`：`public.user_item_nfts.mint_request_id` → `public.nft_mint_requests.id`
+
+---
+
+## public.nft_chain_events
+
+**场景说明**：链上事件落地表：用于接收 webhook / 轮询得到的链上交易事件（tx_hash、exit_code、raw_payload），并以 `processed` 标记防重复消费；用于驱动 `confirm_mint_nft_secure` 等结算流程。
+
+RLS: 开启 | 估算行数: 0
+
+| 列名 | 类型 | 格式 | 属性 | 默认值 | 检查/枚举 | 列注释 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `id` | uuid | uuid | — | gen_random_uuid() | — | — |
+| `source` | text | text | — | — | CHECK: source = ANY (ARRAY['tonapi_webhook'::text, 'toncenter_poll'::text, 'manual'::text]) | — |
+| `external_event_id` | text | text | nullable | — | — | — |
+| `collection_address` | text | text | — | — | — | — |
+| `nft_item_address` | text | text | nullable | — | — | — |
+| `tx_hash` | text | text | — | — | — | — |
+| `exit_code` | integer | int4 | nullable | — | — | — |
+| `raw_payload` | jsonb | jsonb | — | '{}'::jsonb | — | — |
+| `processed` | boolean | bool | — | false | — | — |
+| `processed_at` | timestamp with time zone | timestamptz | nullable | — | — | — |
+| `received_at` | timestamp with time zone | timestamptz | — | now() | — | — |
+
+**主键**：`id`
 
 ---
 
@@ -1205,6 +1413,180 @@ RLS: 开启 | 估算行数: 0
 **外键约束**：
 
 - `vector_indexes_bucket_id_fkey`：`storage.vector_indexes.bucket_id` → `storage.buckets_vectors.id`
+
+---
+
+## 附录：`public` 元数据导出（RLS / Indexes / UNIQUE / Triggers）
+
+> 数据来源：Supabase MCP `execute_sql` 只读查询 `pg_catalog`（同步时间同本文档头部）。
+
+### A. RLS policies（`pg_policies`）
+
+> 说明：仅列出 `public` schema 下已存在的 policy。其余表若显示 “RLS: 开启” 但 **没有 policy**，则对 `anon/authenticated` 默认不可访问。
+
+- `public.case_items`
+  - `Public read access for case_items`: `SELECT` for roles `{public}` — `USING (true)`
+- `public.cases`
+  - `Public read access for cases`: `SELECT` for roles `{public}` — `USING (true)`
+- `public.items`
+  - `Public read access for items`: `SELECT` for roles `{public}` — `USING (true)`
+- `public.leaderboard`
+  - `Public read access for leaderboard`: `SELECT` for roles `{public}` — `USING (true)`
+
+### B. Indexes（`pg_indexes`）
+
+- `public.api_rate_limits`
+  - `api_rate_limits_pkey`: `CREATE UNIQUE INDEX api_rate_limits_pkey ON public.api_rate_limits USING btree (scope, route, window_start)`
+  - `api_rate_limits_updated_at_idx`: `CREATE INDEX api_rate_limits_updated_at_idx ON public.api_rate_limits USING btree (updated_at)`
+- `public.case_items`
+  - `case_items_pkey`: `CREATE UNIQUE INDEX case_items_pkey ON public.case_items USING btree (id)`
+  - `case_items_case_id_item_id_key`: `CREATE UNIQUE INDEX case_items_case_id_item_id_key ON public.case_items USING btree (case_id, item_id)`
+  - `idx_case_items_case_id`: `CREATE INDEX idx_case_items_case_id ON public.case_items USING btree (case_id)`
+- `public.cases`
+  - `cases_pkey`: `CREATE UNIQUE INDEX cases_pkey ON public.cases USING btree (id)`
+  - `cases_case_key_key`: `CREATE UNIQUE INDEX cases_case_key_key ON public.cases USING btree (case_key)`
+- `public.chest_open_events`
+  - `chest_open_events_pkey`: `CREATE UNIQUE INDEX chest_open_events_pkey ON public.chest_open_events USING btree (id)`
+  - `chest_open_events_user_id_request_id_key`: `CREATE UNIQUE INDEX chest_open_events_user_id_request_id_key ON public.chest_open_events USING btree (user_id, request_id)`
+- `public.invite_rewards`
+  - `invite_rewards_pkey`: `CREATE UNIQUE INDEX invite_rewards_pkey ON public.invite_rewards USING btree (id)`
+  - `invite_rewards_created_at_idx`: `CREATE INDEX invite_rewards_created_at_idx ON public.invite_rewards USING btree (created_at DESC)`
+  - `invite_rewards_inviter_user_id_status_idx`: `CREATE INDEX invite_rewards_inviter_user_id_status_idx ON public.invite_rewards USING btree (inviter_user_id, status)`
+  - `invite_rewards_reward_type_idx`: `CREATE INDEX invite_rewards_reward_type_idx ON public.invite_rewards USING btree (reward_type)`
+  - `invite_rewards_unique_invitation_id`: `CREATE UNIQUE INDEX invite_rewards_unique_invitation_id ON public.invite_rewards USING btree (invitation_id)`
+  - `invite_rewards_unique_item_once`: `CREATE UNIQUE INDEX invite_rewards_unique_item_once ON public.invite_rewards USING btree (invitation_id, item_id) WHERE ((reward_type = 'item'::text) AND (item_id IS NOT NULL))`
+  - `invite_rewards_unique_numeric_once`: `CREATE UNIQUE INDEX invite_rewards_unique_numeric_once ON public.invite_rewards USING btree (invitation_id) WHERE (reward_type = ANY (ARRAY['coins'::text, 'points'::text]))`
+- `public.item_nft_metadata`
+  - `item_nft_metadata_pkey`: `CREATE UNIQUE INDEX item_nft_metadata_pkey ON public.item_nft_metadata USING btree (id)`
+  - `item_nft_metadata_item_id_key`: `CREATE UNIQUE INDEX item_nft_metadata_item_id_key ON public.item_nft_metadata USING btree (item_id)`
+- `public.items`
+  - `items_pkey`: `CREATE UNIQUE INDEX items_pkey ON public.items USING btree (id)`
+- `public.leaderboard`
+  - `leaderboard_pkey`: `CREATE UNIQUE INDEX leaderboard_pkey ON public.leaderboard USING btree (id)`
+- `public.nft_chain_events`
+  - `nft_chain_events_pkey`: `CREATE UNIQUE INDEX nft_chain_events_pkey ON public.nft_chain_events USING btree (id)`
+  - `nft_chain_events_processed_received_at_idx`: `CREATE INDEX nft_chain_events_processed_received_at_idx ON public.nft_chain_events USING btree (processed, received_at)`
+  - `uq_nft_chain_events_source_external_event`: `CREATE UNIQUE INDEX uq_nft_chain_events_source_external_event ON public.nft_chain_events USING btree (source, external_event_id) WHERE (external_event_id IS NOT NULL)`
+  - `uq_nft_chain_events_tx_hash_nft_item`: `CREATE UNIQUE INDEX uq_nft_chain_events_tx_hash_nft_item ON public.nft_chain_events USING btree (tx_hash, nft_item_address)`
+- `public.nft_collections`
+  - `nft_collections_pkey`: `CREATE UNIQUE INDEX nft_collections_pkey ON public.nft_collections USING btree (id)`
+  - `nft_collections_collection_key_key`: `CREATE UNIQUE INDEX nft_collections_collection_key_key ON public.nft_collections USING btree (collection_key)`
+  - `nft_collections_collection_address_key`: `CREATE UNIQUE INDEX nft_collections_collection_address_key ON public.nft_collections USING btree (collection_address)`
+- `public.nft_mint_requests`
+  - `nft_mint_requests_pkey`: `CREATE UNIQUE INDEX nft_mint_requests_pkey ON public.nft_mint_requests USING btree (id)`
+  - `nft_mint_requests_status_expires_at_idx`: `CREATE INDEX nft_mint_requests_status_expires_at_idx ON public.nft_mint_requests USING btree (status, expires_at)`
+  - `uq_nft_mint_requests_user_request`: `CREATE UNIQUE INDEX uq_nft_mint_requests_user_request ON public.nft_mint_requests USING btree (user_id, request_id)`
+  - `uq_nft_mint_requests_user_item_inflight`: `CREATE UNIQUE INDEX uq_nft_mint_requests_user_item_inflight ON public.nft_mint_requests USING btree (user_item_id) WHERE (status = ANY (ARRAY['pending'::text, 'signed'::text, 'broadcasted'::text]))`
+  - `uq_nft_mint_requests_confirmed_tx_hash`: `CREATE UNIQUE INDEX uq_nft_mint_requests_confirmed_tx_hash ON public.nft_mint_requests USING btree (confirmed_tx_hash) WHERE (confirmed_tx_hash IS NOT NULL)`
+- `public.purchase_orders`
+  - `purchase_orders_pkey`: `CREATE UNIQUE INDEX purchase_orders_pkey ON public.purchase_orders USING btree (id)`
+  - `purchase_orders_user_id_request_id_key`: `CREATE UNIQUE INDEX purchase_orders_user_id_request_id_key ON public.purchase_orders USING btree (user_id, request_id)`
+  - `purchase_orders_user_created_at_idx`: `CREATE INDEX purchase_orders_user_created_at_idx ON public.purchase_orders USING btree (user_id, created_at DESC)`
+- `public.resource_transactions`
+  - `resource_transactions_pkey`: `CREATE UNIQUE INDEX resource_transactions_pkey ON public.resource_transactions USING btree (id)`
+  - `idx_transactions_user_id`: `CREATE INDEX idx_transactions_user_id ON public.resource_transactions USING btree (user_id)`
+  - `idx_transactions_created_at`: `CREATE INDEX idx_transactions_created_at ON public.resource_transactions USING btree (created_at)`
+- `public.shop_products`
+  - `shop_products_pkey`: `CREATE UNIQUE INDEX shop_products_pkey ON public.shop_products USING btree (id)`
+  - `shop_products_active_idx`: `CREATE INDEX shop_products_active_idx ON public.shop_products USING btree (is_active, product_type, currency)`
+  - `shop_products_unique_case_currency`: `CREATE UNIQUE INDEX shop_products_unique_case_currency ON public.shop_products USING btree (case_id, currency) WHERE ((product_type = 'case'::text) AND (case_id IS NOT NULL))`
+  - `shop_products_unique_item_currency`: `CREATE UNIQUE INDEX shop_products_unique_item_currency ON public.shop_products USING btree (item_id, currency) WHERE ((product_type = 'item'::text) AND (item_id IS NOT NULL))`
+- `public.user_cases`
+  - `user_cases_pkey`: `CREATE UNIQUE INDEX user_cases_pkey ON public.user_cases USING btree (id)`
+  - `user_cases_user_id_case_id_key`: `CREATE UNIQUE INDEX user_cases_user_id_case_id_key ON public.user_cases USING btree (user_id, case_id)`
+  - `idx_user_cases_user_id`: `CREATE INDEX idx_user_cases_user_id ON public.user_cases USING btree (user_id)`
+  - `idx_user_cases_case_id`: `CREATE INDEX idx_user_cases_case_id ON public.user_cases USING btree (case_id)`
+- `public.user_invites`
+  - `user_invites_pkey`: `CREATE UNIQUE INDEX user_invites_pkey ON public.user_invites USING btree (id)`
+  - `user_invites_unique_pair`: `CREATE UNIQUE INDEX user_invites_unique_pair ON public.user_invites USING btree (inviter_user_id, invitee_user_id)`
+  - `user_invites_unique_invitee`: `CREATE UNIQUE INDEX user_invites_unique_invitee ON public.user_invites USING btree (invitee_user_id)`
+  - `user_invites_unique_invitee_user_id`: `CREATE UNIQUE INDEX user_invites_unique_invitee_user_id ON public.user_invites USING btree (invitee_user_id)`
+  - `user_invites_inviter_user_id_created_at_idx`: `CREATE INDEX user_invites_inviter_user_id_created_at_idx ON public.user_invites USING btree (inviter_user_id, created_at DESC)`
+  - `user_invites_inviter_user_id_status_idx`: `CREATE INDEX user_invites_inviter_user_id_status_idx ON public.user_invites USING btree (inviter_user_id, status)`
+  - `user_invites_status_created_at_idx`: `CREATE INDEX user_invites_status_created_at_idx ON public.user_invites USING btree (status, created_at DESC)`
+- `public.user_item_nfts`
+  - `user_item_nfts_pkey`: `CREATE UNIQUE INDEX user_item_nfts_pkey ON public.user_item_nfts USING btree (id)`
+  - `user_item_nfts_mint_request_id_key`: `CREATE UNIQUE INDEX user_item_nfts_mint_request_id_key ON public.user_item_nfts USING btree (mint_request_id)`
+  - `user_item_nfts_nft_item_address_key`: `CREATE UNIQUE INDEX user_item_nfts_nft_item_address_key ON public.user_item_nfts USING btree (nft_item_address)`
+- `public.user_items`
+  - `user_items_pkey`: `CREATE UNIQUE INDEX user_items_pkey ON public.user_items USING btree (id)`
+  - `user_items_user_id_item_id_key`: `CREATE UNIQUE INDEX user_items_user_id_item_id_key ON public.user_items USING btree (user_id, item_id)`
+  - `idx_user_items_user_id`: `CREATE INDEX idx_user_items_user_id ON public.user_items USING btree (user_id)`
+  - `idx_user_items_item_id`: `CREATE INDEX idx_user_items_item_id ON public.user_items USING btree (item_id)`
+- `public.user_prepared_messages`
+  - `user_prepared_messages_pkey`: `CREATE UNIQUE INDEX user_prepared_messages_pkey ON public.user_prepared_messages USING btree (id)`
+  - `user_prepared_messages_user_id_kind_key`: `CREATE UNIQUE INDEX user_prepared_messages_user_id_kind_key ON public.user_prepared_messages USING btree (user_id, kind)`
+  - `user_prepared_messages_user_kind_idx`: `CREATE INDEX user_prepared_messages_user_kind_idx ON public.user_prepared_messages USING btree (user_id, kind)`
+- `public.user_ton_wallets`
+  - `user_ton_wallets_pkey`: `CREATE UNIQUE INDEX user_ton_wallets_pkey ON public.user_ton_wallets USING btree (id)`
+  - `user_ton_wallets_user_id_idx`: `CREATE INDEX user_ton_wallets_user_id_idx ON public.user_ton_wallets USING btree (user_id)`
+  - `uq_user_ton_wallets_user_wallet_active`: `CREATE UNIQUE INDEX uq_user_ton_wallets_user_wallet_active ON public.user_ton_wallets USING btree (user_id, wallet_address) WHERE (unbound_at IS NULL)`
+  - `uq_user_ton_wallets_primary_wallet_unique`: `CREATE UNIQUE INDEX uq_user_ton_wallets_primary_wallet_unique ON public.user_ton_wallets USING btree (wallet_address) WHERE ((is_primary = true) AND (unbound_at IS NULL))`
+- `public.users`
+  - `users_pkey`: `CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)`
+  - `users_telegram_id_key`: `CREATE UNIQUE INDEX users_telegram_id_key ON public.users USING btree (telegram_id)`
+  - `idx_users_telegram_id`: `CREATE INDEX idx_users_telegram_id ON public.users USING btree (telegram_id)`
+
+### C. PK / UNIQUE 约束（`pg_constraint`，仅 `p/u`）
+
+> 说明：此处为 Postgres “约束”层面的 PK/UNIQUE；部分幂等/并发保护使用的是 **partial unique index**（见上文 Indexes），不会出现在这里。
+
+- `public.api_rate_limits`: `api_rate_limits_pkey` — `PRIMARY KEY (scope, route, window_start)`
+- `public.case_items`: `case_items_pkey` — `PRIMARY KEY (id)`；`case_items_case_id_item_id_key` — `UNIQUE (case_id, item_id)`
+- `public.cases`: `cases_pkey` — `PRIMARY KEY (id)`；`cases_case_key_key` — `UNIQUE (case_key)`
+- `public.chest_open_events`: `chest_open_events_pkey` — `PRIMARY KEY (id)`；`chest_open_events_user_id_request_id_key` — `UNIQUE (user_id, request_id)`
+- `public.invite_rewards`: `invite_rewards_pkey` — `PRIMARY KEY (id)`
+- `public.item_nft_metadata`: `item_nft_metadata_pkey` — `PRIMARY KEY (id)`；`item_nft_metadata_item_id_key` — `UNIQUE (item_id)`
+- `public.items`: `items_pkey` — `PRIMARY KEY (id)`
+- `public.leaderboard`: `leaderboard_pkey` — `PRIMARY KEY (id)`
+- `public.nft_chain_events`: `nft_chain_events_pkey` — `PRIMARY KEY (id)`
+- `public.nft_collections`: `nft_collections_pkey` — `PRIMARY KEY (id)`；`nft_collections_collection_key_key` — `UNIQUE (collection_key)`；`nft_collections_collection_address_key` — `UNIQUE (collection_address)`
+- `public.nft_mint_requests`: `nft_mint_requests_pkey` — `PRIMARY KEY (id)`；`uq_nft_mint_requests_user_request` — `UNIQUE (user_id, request_id)`
+- `public.purchase_orders`: `purchase_orders_pkey` — `PRIMARY KEY (id)`；`purchase_orders_user_id_request_id_key` — `UNIQUE (user_id, request_id)`
+- `public.resource_transactions`: `resource_transactions_pkey` — `PRIMARY KEY (id)`
+- `public.shop_products`: `shop_products_pkey` — `PRIMARY KEY (id)`
+- `public.user_cases`: `user_cases_pkey` — `PRIMARY KEY (id)`；`user_cases_user_id_case_id_key` — `UNIQUE (user_id, case_id)`
+- `public.user_invites`: `user_invites_pkey` — `PRIMARY KEY (id)`
+- `public.user_item_nfts`: `user_item_nfts_pkey` — `PRIMARY KEY (id)`；`user_item_nfts_mint_request_id_key` — `UNIQUE (mint_request_id)`；`user_item_nfts_nft_item_address_key` — `UNIQUE (nft_item_address)`
+- `public.user_items`: `user_items_pkey` — `PRIMARY KEY (id)`；`user_items_user_id_item_id_key` — `UNIQUE (user_id, item_id)`
+- `public.user_prepared_messages`: `user_prepared_messages_pkey` — `PRIMARY KEY (id)`；`user_prepared_messages_user_id_kind_key` — `UNIQUE (user_id, kind)`
+- `public.user_ton_wallets`: `user_ton_wallets_pkey` — `PRIMARY KEY (id)`
+- `public.users`: `users_pkey` — `PRIMARY KEY (id)`；`users_telegram_id_key` — `UNIQUE (telegram_id)`
+
+### D. Triggers → Functions（`pg_trigger` + `pg_proc`）
+
+- `public.invite_rewards`
+  - `trg_invite_rewards_guard` → `public.tg_invite_rewards_guard()`
+    - `CREATE TRIGGER trg_invite_rewards_guard BEFORE INSERT ON invite_rewards FOR EACH ROW EXECUTE FUNCTION tg_invite_rewards_guard()`
+  - `trg_invite_rewards_update_guard` → `public.tg_invite_rewards_update_guard()`
+    - `CREATE TRIGGER trg_invite_rewards_update_guard BEFORE UPDATE ON invite_rewards FOR EACH ROW EXECUTE FUNCTION tg_invite_rewards_update_guard()`
+- `public.item_nft_metadata`
+  - `trg_item_nft_metadata_immutability_guard` → `public.item_nft_metadata_immutability_guard()`
+    - `CREATE TRIGGER trg_item_nft_metadata_immutability_guard BEFORE UPDATE ON item_nft_metadata FOR EACH ROW EXECUTE FUNCTION item_nft_metadata_immutability_guard()`
+  - `trg_item_nft_metadata_updated_at` → `public.set_updated_at()`
+    - `CREATE TRIGGER trg_item_nft_metadata_updated_at BEFORE UPDATE ON item_nft_metadata FOR EACH ROW EXECUTE FUNCTION set_updated_at()`
+- `public.nft_collections`
+  - `trg_nft_collections_updated_at` → `public.set_updated_at()`
+    - `CREATE TRIGGER trg_nft_collections_updated_at BEFORE UPDATE ON nft_collections FOR EACH ROW EXECUTE FUNCTION set_updated_at()`
+- `public.nft_mint_requests`
+  - `trg_nft_mint_requests_update_guard` → `public.nft_mint_requests_update_guard()`
+    - `CREATE TRIGGER trg_nft_mint_requests_update_guard BEFORE UPDATE ON nft_mint_requests FOR EACH ROW EXECUTE FUNCTION nft_mint_requests_update_guard()`
+  - `trg_nft_mint_requests_updated_at` → `public.set_updated_at()`
+    - `CREATE TRIGGER trg_nft_mint_requests_updated_at BEFORE UPDATE ON nft_mint_requests FOR EACH ROW EXECUTE FUNCTION set_updated_at()`
+- `public.purchase_orders`
+  - `trg_purchase_orders_updated_at` → `public.set_updated_at()`
+    - `CREATE TRIGGER trg_purchase_orders_updated_at BEFORE UPDATE ON purchase_orders FOR EACH ROW EXECUTE FUNCTION set_updated_at()`
+- `public.shop_products`
+  - `trg_shop_products_updated_at` → `public.set_updated_at()`
+    - `CREATE TRIGGER trg_shop_products_updated_at BEFORE UPDATE ON shop_products FOR EACH ROW EXECUTE FUNCTION set_updated_at()`
+- `public.user_invites`
+  - `trg_user_invites_set_snapshots_and_guard` → `public.tg_user_invites_set_snapshots_and_guard()`
+    - `CREATE TRIGGER trg_user_invites_set_snapshots_and_guard BEFORE INSERT ON user_invites FOR EACH ROW EXECUTE FUNCTION tg_user_invites_set_snapshots_and_guard()`
+  - `trg_user_invites_update_guard` → `public.tg_user_invites_update_guard()`
+    - `CREATE TRIGGER trg_user_invites_update_guard BEFORE UPDATE ON user_invites FOR EACH ROW EXECUTE FUNCTION tg_user_invites_update_guard()`
+- `public.user_item_nfts`
+  - `trg_user_item_nfts_immutability_guard` → `public.user_item_nfts_immutability_guard()`
+    - `CREATE TRIGGER trg_user_item_nfts_immutability_guard BEFORE UPDATE ON user_item_nfts FOR EACH ROW EXECUTE FUNCTION user_item_nfts_immutability_guard()`
 
 ---
 
