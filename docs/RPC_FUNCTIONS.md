@@ -6,7 +6,7 @@
 |------|------|
 | **数据来源** | Supabase MCP `execute_sql`：`pg_proc`、`pg_get_function_identity_arguments`、`pg_get_functiondef` |
 | **远程项目** | `reactTest`（`project_id`: `tfgzxvabdlnkpbikgcjv`） |
-| **同步时间** | 2026-04-19（`pg_get_functiondef` 与 Supabase MCP `list_tables` / `execute_sql` 只读核对；`open_chest_secure` / `open_chest_batch_secure` 为库内加权随机，无 `p_item_id` / `p_item_ids`） |
+| **同步时间** | 2026-04-21（`pg_get_functiondef` 与 Supabase MCP `list_tables` / `execute_sql` 只读核对；`open_chest_secure` / `open_chest_batch_secure` 为库内加权随机，无 `p_item_id` / `p_item_ids`） |
 | **说明** | 部署或 migration 变更后，远程定义可能与本文档不一致；请以数据库为准或重新拉取 `pg_get_functiondef`。 |
 
 ---
@@ -400,7 +400,7 @@ $function$
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | `false` |
-| **行为摘要** | `chest_open_events (user_id, request_id)` 幂等抢占；在 `case_items` 上按 `drop_chance` 做库内加权随机（`ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC LIMIT 1`）；扣余额与 `user_cases`；发放/合并 `user_items`；写回事件中的前后资产与箱数；重复请求返回已存结果。失败时 `RAISE EXCEPTION`（如余额不足、无箱、无掉落配置、用户不存在）。 |
+| **行为摘要** | `chest_open_events (user_id, request_id)` 幂等抢占；在 `case_items` 上按 `drop_chance` 做库内加权随机（累积权重 + `random()` 的标准加权抽样）；扣余额与 `user_cases`；发放/合并 `user_items`；写回事件中的前后资产与箱数；重复请求返回已存结果。失败时 `RAISE EXCEPTION`（如余额不足、无箱、无掉落配置、用户不存在）。 |
 
 > **PostgREST / 重载**：若同时存在多个 `open_chest_secure` 重载，PostgREST 可能对 JSON 参数报 **PGRST203**。远程当前**仅保留本四参数签名**（`p_price integer`，无客户端传入的 `p_item_id`）。`supabase.rpc(..., { p_price: number })` 与此匹配。
 
@@ -422,7 +422,6 @@ DECLARE
   v_event_case_qty_after  integer;
   v_picked_item_id        uuid;
 BEGIN
-  -- 0) 幂等抢占：抢到则继续，否则返回历史结果
   INSERT INTO chest_open_events (user_id, case_id, request_id, price, created_at)
   VALUES (p_user_id, p_chest_id, p_request_id, p_price, now())
   ON CONFLICT (user_id, request_id) DO NOTHING
@@ -459,12 +458,21 @@ BEGIN
     RAISE EXCEPTION 'Not enough chests';
   END IF;
 
-  -- 3) DB 侧加权随机抽奖（Gumbel-max trick：按 drop_chance 权重抽 1 个）
-  --    random() ^ (1/w) 等价于按权重 w 进行无放回 Gumbel 采样，取最大值即中奖物品
-  SELECT item_id INTO v_picked_item_id
-  FROM case_items
-  WHERE case_id = p_chest_id AND drop_chance > 0
-  ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC
+  -- 累积权重 + 单次 random()：标准加权有放回抽样
+  SELECT sub.item_id INTO v_picked_item_id
+  FROM (
+    SELECT ci.item_id,
+      sum(ci.drop_chance) OVER (ORDER BY ci.item_id) AS cum
+    FROM case_items ci
+    WHERE ci.case_id = p_chest_id AND ci.drop_chance > 0
+  ) sub
+  CROSS JOIN LATERAL (
+    SELECT random() * (SELECT sum(ci2.drop_chance)::float8 FROM case_items ci2
+      WHERE ci2.case_id = p_chest_id AND ci2.drop_chance > 0
+    ) AS pick_val
+  ) r
+  WHERE r.pick_val < sub.cum
+  ORDER BY sub.cum ASC
   LIMIT 1;
 
   IF v_picked_item_id IS NULL THEN
@@ -526,7 +534,7 @@ $function$
 | **语言** | `plpgsql` |
 | **Volatile** | `VOLATILE` |
 | **SECURITY DEFINER** | `false` |
-| **行为摘要** | 单事务内连续开箱 `p_times` 次（1–10）：`p_request_ids` 长度须与 `p_times` 一致；每次在 `case_items` 上库内加权随机抽 `item_id`；按 `chest_open_events (user_id, request_id)` 幂等抢占；已存在的 `request_id` 不重复扣费并返回历史 `item_id`；否则扣 `p_price`、减箱、发放 `user_items` 并写事件快照。失败时 `RAISE EXCEPTION`（余额不足、箱数不足、参数非法、无掉落配置等）。 |
+| **行为摘要** | 单事务内连续开箱 `p_times` 次（1–10）：`p_request_ids` 长度须与 `p_times` 一致；每次在 `case_items` 上库内加权随机抽 `item_id`；并支持“本批内尽量不重复掉落”（当本批已抽到的种类数 < 掉落池大小时，优先对未抽中过的 `item_id` 加权抽样；否则恢复为池内全量有放回抽样）；按 `chest_open_events (user_id, request_id)` 幂等抢占；已存在的 `request_id` 不重复扣费并返回历史 `item_id`；否则扣 `p_price`、减箱、发放 `user_items` 并写事件快照。失败时 `RAISE EXCEPTION`（余额不足、箱数不足、参数非法、无掉落配置等）。 |
 
 **源定义**（与远程 `pg_get_functiondef` 一致）：
 
@@ -550,6 +558,8 @@ DECLARE
   v_cur_balance     integer;
   v_cur_case_qty    integer;
   v_picked_item_id  uuid;
+  v_batch_picked    uuid[] := ARRAY[]::uuid[];
+  v_pool_count      integer;
   i                 integer;
 BEGIN
   -- 参数自检
@@ -563,7 +573,14 @@ BEGIN
     RAISE EXCEPTION 'Invalid price';
   END IF;
 
-  -- 统计本批中已处理的次数（幂等重试场景）
+  SELECT count(*)::integer INTO v_pool_count
+  FROM case_items
+  WHERE case_id = p_chest_id AND drop_chance > 0;
+
+  IF v_pool_count IS NULL OR v_pool_count <= 0 THEN
+    RAISE EXCEPTION 'No items configured for this chest';
+  END IF;
+
   SELECT p_times - COUNT(*) INTO v_pending_count
   FROM chest_open_events
   WHERE user_id = p_user_id AND request_id = ANY(p_request_ids);
@@ -614,16 +631,38 @@ BEGIN
       CONTINUE;
     END IF;
 
-    -- DB 侧加权随机抽奖（Gumbel-max trick）
-    SELECT item_id INTO v_picked_item_id
-    FROM case_items
-    WHERE case_id = p_chest_id AND drop_chance > 0
-    ORDER BY (random() ^ (1.0 / drop_chance::float8)) DESC
+    -- 本批内：已抽过的种类数 < 池子大小时不放回，否则恢复为池内全量有放回
+    SELECT sub.item_id INTO v_picked_item_id
+    FROM (
+      SELECT ci.item_id,
+        sum(ci.drop_chance) OVER (ORDER BY ci.item_id) AS cum
+      FROM case_items ci
+      WHERE ci.case_id = p_chest_id AND ci.drop_chance > 0
+        AND (
+          cardinality(v_batch_picked) >= v_pool_count
+          OR NOT (ci.item_id = ANY(v_batch_picked))
+        )
+    ) sub
+    CROSS JOIN LATERAL (
+      SELECT random() * (
+        SELECT coalesce(sum(ci2.drop_chance), 0)::float8
+        FROM case_items ci2
+        WHERE ci2.case_id = p_chest_id AND ci2.drop_chance > 0
+          AND (
+            cardinality(v_batch_picked) >= v_pool_count
+            OR NOT (ci2.item_id = ANY(v_batch_picked))
+          )
+      ) AS pick_val
+    ) r
+    WHERE r.pick_val < sub.cum
+    ORDER BY sub.cum ASC
     LIMIT 1;
 
     IF v_picked_item_id IS NULL THEN
       RAISE EXCEPTION 'No items configured for this chest';
     END IF;
+
+    v_batch_picked := array_append(v_batch_picked, v_picked_item_id);
 
     -- 扣余额 & 宝箱
     UPDATE users SET balance = balance - p_price WHERE id = p_user_id;
